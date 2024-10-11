@@ -849,7 +849,7 @@
     (property "Reference" "JSOME5_1" (at 22.86 217.17 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x05" (at 22.86 219.71 0)
+    (property "Value" "autoremove" (at 22.86 219.71 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 228.6 0)
@@ -864,7 +864,7 @@
     (pin "1" (uuid ae181117-c054-4808-8f90-587920a61f0f))
     (pin "4" (uuid a63e9f90-5ebb-4df0-b448-5688c37e725e))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME5_1") (unit 1)
         )
@@ -878,7 +878,7 @@
     (property "Reference" "JSOME8_1" (at 24.13 166.37 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x08" (at 24.13 168.91 0)
+    (property "Value" "autoremove" (at 24.13 168.91 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 180.34 0)
@@ -896,7 +896,7 @@
     (pin "2" (uuid 646b46a1-2901-4f65-976a-862c55c7b988))
     (pin "8" (uuid 2e29547e-427c-4b8b-ba09-0c3cd8bd306e))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME8_1") (unit 1)
         )
@@ -910,7 +910,7 @@
     (property "Reference" "JSOME6_1" (at 24.13 194.31 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x06" (at 24.13 196.85 0)
+    (property "Value" "autoremove" (at 24.13 196.85 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 205.74 0)
@@ -926,7 +926,7 @@
     (pin "5" (uuid f0139077-3755-49a9-af40-4076d4c0bd8d))
     (pin "6" (uuid 11944be6-ae3f-4efc-bd99-d5ac1dd3159d))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME6_1") (unit 1)
         )
@@ -940,7 +940,7 @@
     (property "Reference" "JSOME1_1" (at 21.59 266.7 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x02" (at 22.86 269.24 0)
+    (property "Value" "autoremove" (at 22.86 269.24 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 271.78 0)
@@ -952,7 +952,7 @@
     (pin "2" (uuid 1a719cb7-f516-4b03-bfa4-ff88778597b6))
     (pin "1" (uuid df417dff-5466-4f4d-9bcd-41bdad0d2570))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME1_1") (unit 1)
         )
@@ -966,7 +966,7 @@
     (property "Reference" "JSOME22_1" (at 24.13 102.87 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x22" (at 24.13 105.41 0)
+    (property "Value" "autoremove" (at 24.13 105.41 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 134.62 0)
@@ -998,7 +998,7 @@
     (pin "3" (uuid 7946013f-4772-4d54-9726-278c32593ab2))
     (pin "11" (uuid cc298268-a28c-4e86-82f1-dc3cce333d39))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME22_1") (unit 1)
         )
@@ -1012,7 +1012,7 @@
     (property "Reference" "JSOME4_1" (at 24.13 237.49 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x04" (at 24.13 240.03 0)
+    (property "Value" "autoremove" (at 24.13 240.03 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 246.38 0)
@@ -1026,7 +1026,7 @@
     (pin "4" (uuid 000e5698-1739-453f-8359-42fee15eabba))
     (pin "1" (uuid ff0e39b8-d0ad-43e9-ae32-e62d478a3f37))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME4_1") (unit 1)
         )
@@ -1040,7 +1040,7 @@
     (property "Reference" "JSOME32_1" (at 24.13 13.97 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x32" (at 24.13 16.51 0)
+    (property "Value" "autoremove" (at 24.13 16.51 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 58.42 0)
@@ -1082,7 +1082,7 @@
     (pin "11" (uuid a25e72d5-869f-4314-a175-59f5a1aad697))
     (pin "31" (uuid 98111266-4f38-40c9-98c0-6180e4d4b6aa))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME32_1") (unit 1)
         )
@@ -1096,7 +1096,7 @@
     (property "Reference" "JSOME2_1" (at 21.59 255.27 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "Conn_01x02" (at 22.86 257.81 0)
+    (property "Value" "autoremove" (at 22.86 257.81 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 260.35 0)
@@ -1108,7 +1108,7 @@
     (pin "2" (uuid 09344d84-1a8a-4a08-8675-a1d0097c035f))
     (pin "1" (uuid c6877a72-b152-4311-aeee-256897269ea2))
     (instances
-      (project "09"
+      (project "template_jsome"
         (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
           (reference "JSOME2_1") (unit 1)
         )
