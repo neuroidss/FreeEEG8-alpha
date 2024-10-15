@@ -1,0 +1,18 @@
+(footprint "NeuroIDSS-url_5mm_SilkScreen" (version 20221018) (generator pcbnew)
+  (layer "F.Cu")
+  (descr "KiCad Logo")
+  (tags "Logo KiCad")
+  (attr exclude_from_pos_files exclude_from_bom)
+  (fp_text reference "REF**" (at 0 -5.08) (layer "F.SilkS") hide
+      (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 80e2d80b-6efc-41aa-bdb5-5a69bedfe6ea)
+  )
+  (fp_text value "NeuroIDSS-url_5mm_SilkScreen" (at 0 3.81) (layer "F.Fab") hide
+      (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 436d3361-13ee-4a88-afb2-42ba6c0634a7)
+  )
+  (fp_text user "neuroidss.com" (at 0 0 unlocked) (layer "F.SilkS")
+      (effects (font (size 0.45 0.45) (thickness 0.1)))
+    (tstamp bd4333f3-2c1b-488b-bdef-fa35c4875006)
+  )
+)
