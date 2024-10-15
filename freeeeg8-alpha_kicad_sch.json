@@ -28,5 +28,7 @@
      ["R2", ["SYNC/RESET_XIAO", "SYNC/RESET_ADC"], "Resistor_SMD:R_0402_1005Metric"],
      ["R3", ["GND", "GND_POGOPIN"], "Resistor_SMD:R_0402_1005Metric"],
      ["R4", ["AINREF", "AINREF_POGOPIN"], "Resistor_SMD:R_0402_1005Metric"],
-     ["X1", ["XTAL_NC", "GND", "XTAL1/CLKIN", "DVDD_XTAL"], "freeeeg8-alpha:Oscillator_SMD_EuroQuartz_XO32-4Pin_3.2x2.5mm_HandSoldering"]
+     ["X1", ["XTAL_NC", "GND", "XTAL1/CLKIN", "DVDD_XTAL"], "freeeeg8-alpha:Oscillator_SMD_EuroQuartz_XO32-4Pin_3.2x2.5mm_HandSoldering"],
+     ["GL1", [], "freeeeg8-alpha:FreeEEG8-alpha-title_5mm_SilkScreen"],
+     ["GL2", [], "freeeeg8-alpha:NeuroIDSS-url_5mm_SilkScreen"]
 ]

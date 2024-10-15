@@ -843,6 +843,32 @@
   )
 
 
+  (symbol (lib_id "Connector_Generic:Conn_01x02") (at 17.78 283.21 0) (mirror y) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid 20fde907-983a-423d-9a82-0e18491bf352)
+    (property "Reference" "JSOME0_1" (at 21.59 278.13 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Value" "autoremove" (at 22.86 280.67 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Footprint" "Symbol:OSHW-Symbol_6.7x6mm_SilkScreen" (at 17.78 283.21 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "~" (at 17.78 283.21 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid a073e325-e3cd-43dc-acc8-0b92a91dc901))
+    (pin "1" (uuid dc64d819-5fa6-47e7-8178-a1fe8abc33dd))
+    (instances
+      (project "template_jsome"
+        (path "/09aea597-a04d-41ef-ad99-d414ceb348c0"
+          (reference "JSOME0_1") (unit 1)
+        )
+      )
+    )
+  )
+
   (symbol (lib_id "Connector_Generic:Conn_01x05") (at 17.78 228.6 0) (mirror y) (unit 1)
     (in_bom yes) (on_board yes) (dnp no)
     (uuid 4751b59f-ecef-49a0-abe2-31995ca4f5f6)
