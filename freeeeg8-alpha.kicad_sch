@@ -4606,6 +4606,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 185.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "247dd968-cf36-4dd2-aaf6-499316e2fa55")
 		)
@@ -4673,6 +4682,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "RC0402JR-070RL"
+			(at 55.57 187.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -4744,6 +4762,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 85.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "6f3ecb57-bea6-43e0-8446-2d54b04bb379")
 		)
@@ -4811,6 +4838,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "ADS131M08IPBSR"
+			(at 20.32 62.23 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "23"
@@ -4972,6 +5008,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 105.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "79920564-c9ae-4ad9-ac23-f394d3e29667")
 		)
@@ -5041,6 +5086,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 125.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "977977d5-cb2e-4426-b204-61bc69810978")
 		)
@@ -5108,6 +5162,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "53398-0671"
+			(at 116.84 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "1"
@@ -5191,6 +5254,15 @@
 				)
 			)
 		)
+		(property "MPN" "GRM188R71A225KE15D"
+			(at 146.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "1431b0f8-fb7b-47eb-8ac9-5388b3ada309")
 		)
@@ -5258,6 +5330,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "GRM188R71A225KE15D"
+			(at 186.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -5329,6 +5410,15 @@
 				)
 			)
 		)
+		(property "MPN" "CC0402KRX5R5BB224"
+			(at 26.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "119175af-3038-4eb6-aa61-c7826653f47f")
 		)
@@ -5396,6 +5486,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "RC0402JR-070RL"
+			(at 75.57 187.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -5467,6 +5566,15 @@
 				)
 			)
 		)
+		(property "MPN" "GRM188R71A225KE15D"
+			(at 126.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "4b9a7981-100d-4e74-8e51-521bf347d25a")
 		)
@@ -5536,6 +5644,15 @@
 				)
 			)
 		)
+		(property "MPN" "CL05B104KO5NNNC"
+			(at 46.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "f6c8175c-00f0-446e-a043-10a4bd53f6fb")
 		)
@@ -5603,6 +5720,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "53398-0671"
+			(at 83.82 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "1"
@@ -5684,6 +5810,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 165.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -5842,6 +5977,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 25.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "1ace7676-da0f-490c-83c2-9138f5fa7362")
 		)
@@ -5909,6 +6053,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "RC0402JR-070RL"
+			(at 35.57 187.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -6049,6 +6202,15 @@
 				)
 			)
 		)
+		(property "MPN" "GRM188R71A225KE15D"
+			(at 206.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "40ec7bd2-a862-44b3-b0ea-6f1df20ff4e5")
 		)
@@ -6116,6 +6278,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "CL05A105KO5NNNC"
+			(at 66.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -6187,6 +6358,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 45.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "b48a12d3-e0f0-4042-acc1-74fdd673e86c")
 		)
@@ -6254,6 +6434,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 145.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -6325,6 +6514,15 @@
 				)
 			)
 		)
+		(property "MPN" "RC0402JR-070RL"
+			(at 95.57 187.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "c7798833-4899-4cea-a792-e5c7b6f0a676")
 		)
@@ -6392,6 +6590,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 65.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -6532,6 +6739,15 @@
 				)
 			)
 		)
+		(property "MPN" "pogo-pin-d5x10mm-smd"
+			(at 205.74 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "651efd17-720b-4864-9521-926736a9710d")
 		)
@@ -6599,6 +6815,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "LP5907QMFX-3.3Q1"
+			(at 89.86 57.15 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "5"
@@ -6808,6 +7033,15 @@
 				)
 			)
 		)
+		(property "MPN" "DNP"
+			(at 86.36 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "eeea3843-3a79-4a06-9679-2333f0e0fa8d")
 		)
@@ -6877,6 +7111,15 @@
 				)
 			)
 		)
+		(property "MPN" "CL05A105KO5NNNC"
+			(at 86.05 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "38778381-1185-413f-8775-3dbc833d0b0d")
 		)
@@ -6944,6 +7187,15 @@
 				(font
 					(size 1.27 1.27)
 				)
+			)
+		)
+		(property "MPN" "ECS-2520MVLC-081.92-CN-TR"
+			(at 115.57 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
 			)
 		)
 		(pin "2"
@@ -7021,6 +7273,15 @@
 				)
 			)
 		)
+		(property "MPN" "LP5907QMFX-3.3Q1"
+			(at 90.17 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "5"
 			(uuid "edaed61d-3381-47cb-9e70-ea5f72354973")
 		)
@@ -7092,6 +7353,15 @@
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x07, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 110.49 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "MPN" "TSM-107-01-L-SV"
 			(at 110.49 31.75 0)
 			(effects
 				(font
@@ -7177,6 +7447,15 @@
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x07, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 138.43 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "MPN" "TSM-107-01-L-SV"
 			(at 138.43 31.75 0)
 			(effects
 				(font
