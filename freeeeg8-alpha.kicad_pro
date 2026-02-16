@@ -188,8 +188,12 @@
       ],
       "track_widths": [
         0.0,
+        0.15,
         0.2,
-        0.5
+        0.3,
+        0.4,
+        0.5,
+        0.8
       ],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
@@ -611,7 +615,7 @@
     "meta": {
       "version": 1
     },
-    "net_format_name": "",
+    "net_format_name": "KiCad",
     "page_layout_descr_file": "",
     "plot_directory": "",
     "space_save_all_events": true,

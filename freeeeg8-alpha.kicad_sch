@@ -3313,7 +3313,7 @@
 		(uuid "1eaee5a9-6cdf-4f94-91b1-72d62b3e2e03")
 	)
 	(label "DIN"
-		(at 143.51 34.29 0)
+		(at 143.51 29.21 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3373,7 +3373,7 @@
 		(uuid "28d9997f-0059-4ef6-8e56-ca92592c4cbc")
 	)
 	(label "SCLK"
-		(at 143.51 29.21 0)
+		(at 143.51 34.29 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3553,7 +3553,7 @@
 		(uuid "4c4a7a58-95ab-4419-bbb3-73d8e0f7f2b1")
 	)
 	(label "XTAL1/CLKIN"
-		(at 88.9 88.9 0)
+		(at 88.9 86.36 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3713,7 +3713,7 @@
 		(uuid "61c6f124-af7c-4ba9-948c-caf27c226405")
 	)
 	(label "AINREF_STACK"
-		(at 121.92 88.9 0)
+		(at 121.92 91.44 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3793,7 +3793,7 @@
 		(uuid "7730ae20-7fa9-40c5-9658-39282d90affb")
 	)
 	(label "AINREF_STACK"
-		(at 88.9 86.36 0)
+		(at 88.9 83.82 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3843,7 +3843,7 @@
 		(uuid "7eed9c38-6645-4e51-a905-b6b0504c2279")
 	)
 	(label "SYNC/RESET_ADC"
-		(at 88.9 83.82 0)
+		(at 88.9 88.9 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3893,7 +3893,7 @@
 		(uuid "8d5cfca1-9b6e-4e9a-927f-0b74f0b2f3aa")
 	)
 	(label "SYNC/RESET_ADC"
-		(at 121.92 91.44 0)
+		(at 121.92 86.36 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4143,7 +4143,7 @@
 		(uuid "bcd68ba8-6c0f-4dd2-b5c2-9c455a097a39")
 	)
 	(label "XTAL1/CLKIN"
-		(at 121.92 86.36 0)
+		(at 121.92 88.9 0)
 		(effects
 			(font
 				(size 1.27 1.27)
