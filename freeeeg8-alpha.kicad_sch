@@ -3182,15 +3182,15 @@
 		)
 		(uuid "0026b8c2-c2b7-4be5-bb2c-f92be25bb071")
 	)
-	(label "CS"
-		(at 50.8 30.48 0)
+	(label "XIAO_NC1"
+		(at 50.8 25.4 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 			(justify left bottom)
 		)
-		(uuid "03938f15-9933-45bc-9b4b-6af868fcac8e")
+		(uuid "0307ddc8-b0de-4d80-8cb2-dcfa35fe4034")
 	)
 	(label "SYNC/RESET_ADC"
 		(at 60.65 190.5 0)
@@ -3282,16 +3282,6 @@
 		)
 		(uuid "1a11f275-566c-40fa-a6d4-2785c6027cc5")
 	)
-	(label "XIAO_NC1"
-		(at 50.8 33.02 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "1dd349f9-61dd-47ab-8f02-95dec5b7e958")
-	)
 	(label "DVDD"
 		(at 40.65 187.96 0)
 		(effects
@@ -3352,6 +3342,26 @@
 		)
 		(uuid "22dfe3f2-c74e-4698-aae5-47a71ab64548")
 	)
+	(label "CS"
+		(at 50.8 35.56 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "245f055c-f1b7-4492-ad71-88ebf7009bf7")
+	)
+	(label "SYNC/RESET_XIAO"
+		(at 50.8 33.02 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "27133ebf-d548-4ab6-84b7-2bc02f028f08")
+	)
 	(label "BAT+"
 		(at 50.8 78.74 0)
 		(effects
@@ -3381,16 +3391,6 @@
 			(justify left bottom)
 		)
 		(uuid "28db67cd-734c-4f20-a878-3acfed911954")
-	)
-	(label "XIAO_NC3"
-		(at 50.8 38.1 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "29068aaf-4fc4-4260-9e59-73687755b4d9")
 	)
 	(label "SYNC/RESET_XIAO"
 		(at 115.57 29.21 0)
@@ -3443,7 +3443,7 @@
 		(uuid "30fcada7-e6c6-460e-a274-5ca2e2f8a3c9")
 	)
 	(label "XIAO_NC6"
-		(at 50.8 53.34 0)
+		(at 50.8 45.72 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3712,6 +3712,16 @@
 		)
 		(uuid "61c6f124-af7c-4ba9-948c-caf27c226405")
 	)
+	(label "DRDY"
+		(at 50.8 38.1 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "62479dbf-d20d-48f4-bc2c-effd94c3f524")
+	)
 	(label "AINREF_STACK"
 		(at 121.92 91.44 0)
 		(effects
@@ -3813,7 +3823,7 @@
 		(uuid "796d5b6e-2beb-4652-b297-9bb4b0f1f7f8")
 	)
 	(label "SCLK"
-		(at 50.8 45.72 0)
+		(at 50.8 53.34 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4172,16 +4182,6 @@
 		)
 		(uuid "c17c3eb8-7b53-4e9f-abdc-afed11abfe6e")
 	)
-	(label "DRDY"
-		(at 50.8 27.94 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "c22b01c3-af7d-4127-9c97-853d069c8d6a")
-	)
 	(label "AINREF_POGOPIN"
 		(at 190.82 152.4 0)
 		(effects
@@ -4283,7 +4283,7 @@
 		(uuid "d41cb393-9a9e-4316-84ad-e2dd8bc3c643")
 	)
 	(label "DIN"
-		(at 50.8 50.8 0)
+		(at 50.8 48.26 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4301,6 +4301,16 @@
 			(justify left bottom)
 		)
 		(uuid "d630f64b-be84-417e-9f86-1e4602fbcc7d")
+	)
+	(label "XIAO_NC3"
+		(at 50.8 30.48 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "d6655b7c-b499-4e7a-9667-535d732b6e7e")
 	)
 	(label "NFC1"
 		(at 70.8 104.14 0)
@@ -4402,16 +4412,6 @@
 		)
 		(uuid "e62bf52c-342b-4103-b8bf-4c3305b58626")
 	)
-	(label "SYNC/RESET_XIAO"
-		(at 50.8 25.4 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "e7f70379-03a1-4f34-aebf-e88e9c3508b4")
-	)
 	(label "GND"
 		(at 50.8 55.88 0)
 		(effects
@@ -4442,6 +4442,16 @@
 		)
 		(uuid "ebe12495-950e-4dd8-b1c3-cb539744d547")
 	)
+	(label "XIAO_NC2"
+		(at 50.8 27.94 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ed9b6f8e-e1eb-4b85-919a-cd748a03390b")
+	)
 	(label "5V"
 		(at 121.92 81.28 0)
 		(effects
@@ -4451,16 +4461,6 @@
 			(justify left bottom)
 		)
 		(uuid "ef03f1e5-3b11-43e8-bd18-c316625bcfbb")
-	)
-	(label "XIAO_NC2"
-		(at 50.8 35.56 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "efc81076-100a-4903-9bc8-825852658a75")
 	)
 	(label "XTAL1/CLKIN"
 		(at 120.65 176.53 0)
@@ -4543,7 +4543,7 @@
 		(uuid "fd532379-3777-4bf1-b4a5-0ad57f37d658")
 	)
 	(label "DOUT"
-		(at 50.8 48.26 0)
+		(at 50.8 50.8 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -7034,6 +7034,15 @@
 			)
 		)
 		(property "MPN" "DNP"
+			(at 86.36 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "DNP" "DNP"
 			(at 86.36 173.99 0)
 			(effects
 				(font

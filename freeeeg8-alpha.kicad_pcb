@@ -828,6 +828,19 @@
 				)
 			)
 		)
+		(property "DNP" "DNP"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "4fe1252b-5986-4ee4-9ddd-b7f0594fc30e")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/d4d30e80-259a-4d79-82c4-f01fa41c3006")
 		(sheetname "/")
