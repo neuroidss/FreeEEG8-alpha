@@ -3303,14 +3303,14 @@
 		(uuid "1eaee5a9-6cdf-4f94-91b1-72d62b3e2e03")
 	)
 	(label "DIN"
-		(at 143.51 29.21 0)
+		(at 50.8 45.72 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 			(justify left bottom)
 		)
-		(uuid "214dc0b9-fbf6-4203-9f80-cfb88f66f18f")
+		(uuid "1ecb9a93-50a9-4f96-abee-e0aaa82d6b89")
 	)
 	(label "SWCLK"
 		(at 50.8 60.96 0)
@@ -3362,6 +3362,16 @@
 		)
 		(uuid "27133ebf-d548-4ab6-84b7-2bc02f028f08")
 	)
+	(label "SCLK"
+		(at 50.8 50.8 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "276bab5c-b94e-48c7-abb5-1f116e094ec4")
+	)
 	(label "BAT+"
 		(at 50.8 78.74 0)
 		(effects
@@ -3381,16 +3391,6 @@
 			(justify left bottom)
 		)
 		(uuid "28d9997f-0059-4ef6-8e56-ca92592c4cbc")
-	)
-	(label "SCLK"
-		(at 143.51 34.29 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "28db67cd-734c-4f20-a878-3acfed911954")
 	)
 	(label "SYNC/RESET_XIAO"
 		(at 115.57 29.21 0)
@@ -3441,16 +3441,6 @@
 			(justify left bottom)
 		)
 		(uuid "30fcada7-e6c6-460e-a274-5ca2e2f8a3c9")
-	)
-	(label "XIAO_NC6"
-		(at 50.8 45.72 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "316e64d5-949d-49a5-8e98-fcb00781fcad")
 	)
 	(label "GND"
 		(at 80.65 187.96 0)
@@ -3732,6 +3722,16 @@
 		)
 		(uuid "64d9ed27-0c7f-4d60-95bd-06b97be6b350")
 	)
+	(label "SCLK"
+		(at 143.51 31.75 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "6717da67-1d54-419d-94a0-2e20ed1fdbf2")
+	)
 	(label "GND"
 		(at 70.8 93.98 0)
 		(effects
@@ -3822,16 +3822,6 @@
 		)
 		(uuid "796d5b6e-2beb-4652-b297-9bb4b0f1f7f8")
 	)
-	(label "SCLK"
-		(at 50.8 53.34 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "7bd23d0e-1cb1-432b-99d7-feeb585aa0b2")
-	)
 	(label "AIN6P"
 		(at 25.4 44.45 0)
 		(effects
@@ -3871,16 +3861,6 @@
 			(justify left bottom)
 		)
 		(uuid "81456b8f-dd0e-43ec-8908-281dd035f43c")
-	)
-	(label "DOUT"
-		(at 143.51 31.75 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "8a294d01-ea85-4a1e-9a84-19832955ca08")
 	)
 	(label "5V"
 		(at 50.8 58.42 0)
@@ -3992,16 +3972,6 @@
 		)
 		(uuid "9a391b91-41bc-4f42-844f-1d94a38d96ce")
 	)
-	(label "XIAO_NC6"
-		(at 143.51 26.67 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "9c3c87d1-45a5-4148-bd4c-6851b545394e")
-	)
 	(label "DVDD"
 		(at 95.25 36.83 0)
 		(effects
@@ -4102,6 +4072,16 @@
 		)
 		(uuid "ada527d7-2cee-4aaa-bed5-b993ea566db6")
 	)
+	(label "DOUT"
+		(at 143.51 29.21 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ae862526-6d28-436e-b91a-a1a772ad2dd8")
+	)
 	(label "SWCLK"
 		(at 70.8 96.52 0)
 		(effects
@@ -4161,6 +4141,26 @@
 			(justify left bottom)
 		)
 		(uuid "bdcdd0e5-58e7-4c73-882e-94ae2e8ea784")
+	)
+	(label "DIN"
+		(at 143.51 26.67 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "bf50cf5b-26b9-4d50-8655-7883439c78a2")
+	)
+	(label "3_3V"
+		(at 50.8 53.34 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "c0258e8e-52a2-4307-812d-822c9a9a5388")
 	)
 	(label "GND"
 		(at 211.13 134.62 0)
@@ -4282,16 +4282,6 @@
 		)
 		(uuid "d41cb393-9a9e-4316-84ad-e2dd8bc3c643")
 	)
-	(label "DIN"
-		(at 50.8 48.26 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "d4c0077a-fd25-425b-827b-b1f7c7c7c153")
-	)
 	(label "AIN4P"
 		(at 110.82 152.4 0)
 		(effects
@@ -4321,6 +4311,16 @@
 			(justify left bottom)
 		)
 		(uuid "d86e3362-2098-4e19-aa14-d2fa23e16f57")
+	)
+	(label "DOUT"
+		(at 50.8 48.26 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "da410131-e588-4e0a-ab04-cfe1c103eeaf")
 	)
 	(label "AINREF"
 		(at 91.44 176.53 0)
@@ -4411,6 +4411,16 @@
 			(justify left bottom)
 		)
 		(uuid "e62bf52c-342b-4103-b8bf-4c3305b58626")
+	)
+	(label "3_3V"
+		(at 143.51 34.29 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "e727bfc5-4885-4623-b1ca-a1534e10065b")
 	)
 	(label "GND"
 		(at 50.8 55.88 0)
@@ -4541,16 +4551,6 @@
 			(justify left bottom)
 		)
 		(uuid "fd532379-3777-4bf1-b4a5-0ad57f37d658")
-	)
-	(label "DOUT"
-		(at 50.8 50.8 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "fd6a1a95-fe57-41b9-b9a7-5ef45bb54c50")
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x02")
