@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neural Hyper-Web (Mobile GPU)</title>
+    <style>
+        body { 
+            margin: 0; background: #000; overflow: hidden; 
+            font-family: 'Courier New', monospace;
+            touch-action: none; /* Блокируем зум пальцами */
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.8); z-index: 10;
+            transition: opacity 0.5s;
+        }
+        
+        button {
+            background: rgba(0, 255, 204, 0.1); color: #00ffcc;
+            border: 2px solid #00ffcc; padding: 20px 40px;
+            font-size: 20px; font-weight: bold; border-radius: 50px;
+            margin: 10px; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            backdrop-filter: blur(5px);
+        }
+        button:active { background: #00ffcc; color: #000; }
+        
+        #status {
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            text-align: center; color: #666; font-size: 12px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1 style="color:white; text-shadow: 0 0 10px #fff;">NEURAL HYPER-WEB</h1>
+    <button id="btn-full">1. GO FULLSCREEN</button>
+    <button id="btn-conn">2. CONNECT BLE</button>
+</div>
+
+<canvas id="cvs"></canvas>
+<div id="status">WAITING FOR CONNECTION...</div>
+
+<script>
+// === CONFIGURATION ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const PARTICLE_COUNT = 1500;
+const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
+
+// Frequency Bands (approximate IIR filter coeffs for 250Hz)
+const BANDS = [
+    { name: 'Theta',  color: [100, 0, 255], speed: 0.02 }, // Purple
+    { name: 'Alpha',  color: [0, 255, 200], speed: 0.04 }, // Cyan
+    { name: 'Beta',   color: [50, 255, 50], speed: 0.07 }, // Green
+    { name: 'Gamma1', color: [255, 200, 0], speed: 0.12 }, // Gold
+    { name: 'Gamma2', color: [255, 50, 50], speed: 0.20 }  // Red
+];
+
+// === STATE ===
+let isRunning = false;
+let packetBuffer = new Uint8Array();
+// Data: [Channels][History]
+let rawHistory = Array.from({length: 8}, () => [0,0]); 
+
+// Filters State: [Band][Channel][v1, v2]
+let filtersState = BANDS.map(() => Array.from({length: 8}, () => ({v1:0, v2:0})));
+// Signals: [Band][Channel]
+let bandEnergy = BANDS.map(() => new Float32Array(8).fill(0));
+let bandPhase = BANDS.map(() => new Float32Array(8).fill(0));
+let bandPrev = BANDS.map(() => new Float32Array(8).fill(0)); // For phase calc
+
+// Simple IIR Bandpass Coefficients (Pre-calculated for 250Hz)
+// Normalized slightly for visual effect
+const FILTERS = [
+    { a: [1, -1.97, 0.971], b: [0.014, 0, -0.014] }, // Theta
+    { a: [1, -1.90, 0.95],  b: [0.02, 0, -0.02] },   // Alpha
+    { a: [1, -1.70, 0.90],  b: [0.05, 0, -0.05] },   // Beta
+    { a: [1, -1.17, 0.80],  b: [0.10, 0, -0.10] },   // Gamma1
+    { a: [1, -0.61, 0.60],  b: [0.20, 0, -0.20] }    // Gamma2
+];
+
+// === GEOMETRY CACHE ===
+let width, height, cx, cy, radius;
+const nodes = [];
+const pairs = [];
+
+function initGeometry() {
+    nodes.length = 0;
+    const angleStep = (Math.PI * 2) / 8;
+    // Nodes position (Circle)
+    for(let i=0; i<8; i++) {
+        // Rotate -90deg to start top
+        const a = i * angleStep - Math.PI/2;
+        nodes.push({ x: Math.cos(a), y: Math.sin(a) });
+    }
+    
+    // Generate all unique pairs (28 total)
+    pairs.length = 0;
+    for(let i=0; i<8; i++) {
+        for(let j=i+1; j<8; j++) {
+            // Bezier Control Point (pulls towards center)
+            // Midpoint
+            let mx = (nodes[i].x + nodes[j].x) / 2;
+            let my = (nodes[i].y + nodes[j].y) / 2;
+            let d = Math.sqrt(mx*mx + my*my);
+            
+            // Normalize & Scale logic similar to Python
+            // If line goes through center, offset it slightly
+            let cpx, cpy;
+            if(d < 0.1) { cpx = -nodes[i].y*0.5; cpy = nodes[i].x*0.5; }
+            else { cpx = mx * 0.2; cpy = my * 0.2; } // Pull towards center
+            
+            pairs.push({ p1: i, p2: j, cp: {x: cpx, y: cpy} });
+        }
+    }
+}
+
+// === PARTICLES ===
+const particles = [];
+function initParticles() {
+    particles.length = 0;
+    for(let i=0; i<PARTICLE_COUNT; i++) {
+        particles.push({
+            t: Math.random(),
+            pairIdx: Math.floor(Math.random() * pairs.length),
+            bandIdx: Math.floor(Math.random() * BANDS.length),
+            speed: 0
+        });
+    }
+}
+
+// === IIR FILTER IMPLEMENTATION ===
+function processFilters(sample, ch) {
+    // Notch 50Hz (Approximate simple moving average removal for DC/Drift first)
+    const dcRemoved = sample - rawHistory[ch][0]; 
+    rawHistory[ch][0] = rawHistory[ch][0]*0.9 + sample*0.1; // Slow DC tracker
+
+    for(let b=0; b<BANDS.length; b++) {
+        const F = FILTERS[b];
+        const S = filtersState[b][ch];
+        
+        // Direct Form I or II logic (simplified)
+        // y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+        // Simplified State Variable for viz:
+        const input = dcRemoved;
+        const out = F.b[0]*input + S.v1;
+        S.v1 = F.b[1]*input - F.a[1]*out + S.v2;
+        S.v2 = F.b[2]*input - F.a[2]*out;
+        
+        // Energy & Phase
+        const val = out;
+        bandEnergy[b][ch] = bandEnergy[b][ch] * 0.9 + Math.abs(val) * 0.1;
+        
+        // Phase approximation: atan2(current, previous)
+        bandPhase[b][ch] = Math.atan2(val, bandPrev[b][ch] + 0.00001);
+        bandPrev[b][ch] = val;
+    }
+}
+
+// === BLUETOOTH ===
+async function connectBLE() {
+    try {
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const char = await service.getCharacteristic(CHAR_UUID);
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', onData);
+        
+        document.getElementById('ui').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui').style.display = 'none', 500);
+        document.getElementById('status').innerText = "STREAMING ACTIVE";
+        
+        isRunning = true;
+        animate();
+    } catch(e) {
+        alert(e);
+    }
+}
+
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    const tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
+    
+    while(packetBuffer.length >= 33) {
+        // Find header
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) {
+                head = i; break;
+            }
+        }
+        
+        if(head === -1) {
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33);
+            break;
+        }
+        
+        if(head > 0) {
+            packetBuffer = packetBuffer.slice(head);
+            continue;
+        }
+        
+        // Parse
+        for(let ch=0; ch<8; ch++) {
+            let v = (packetBuffer[2+ch*3]<<16) | (packetBuffer[3+ch*3]<<8) | packetBuffer[4+ch*3];
+            if(v & 0x800000) v -= 0x1000000;
+            processFilters(v * UV_SCALE, ch);
+        }
+        
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+// === RENDER LOOP ===
+const canvas = document.getElementById('cvs');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cx = canvas.width / 2;
+    cy = canvas.height / 2;
+    radius = Math.min(cx, cy) * 0.9;
+    initGeometry();
+}
+window.onresize = resize;
+resize();
+initParticles();
+
+// Global AGC
+let runningMax = 10.0;
+
+function animate() {
+    if(!isRunning) return;
+    
+    // Fade effect
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; // Trail length
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Additive Blending for "Glow"
+    ctx.globalCompositeOperation = 'lighter';
+    
+    // AGC Update
+    let maxE = 0;
+    for(let b=0; b<BANDS.length; b++) 
+        for(let c=0; c<8; c++) maxE = Math.max(maxE, bandEnergy[b][c]);
+    
+    runningMax = runningMax * 0.95 + maxE * 0.05;
+    const scale = 50.0 / (runningMax + 0.1);
+
+    // Update & Draw Particles
+    for(let i=0; i<PARTICLE_COUNT; i++) {
+        const p = particles[i];
+        const pair = pairs[p.pairIdx];
+        const band = BANDS[p.bandIdx];
+        
+        // Physics
+        const e1 = bandEnergy[p.bandIdx][pair.p1];
+        const e2 = bandEnergy[p.bandIdx][pair.p2];
+        const ph1 = bandPhase[p.bandIdx][pair.p1];
+        const ph2 = bandPhase[p.bandIdx][pair.p2];
+        
+        // Direction based on phase diff
+        const diff = ph1 - ph2;
+        const dir = (diff > 0) ? 1 : -1;
+        const flow = Math.abs(diff); // How strong is the flow
+        const amp = (e1 + e2) * 0.5 * scale;
+        
+        // Speed modulation
+        const speed = band.speed * (0.5 + flow + amp*0.1);
+        p.t += speed * dir;
+        
+        // Wrap around
+        if(p.t > 1) p.t = 0;
+        if(p.t < 0) p.t = 1;
+        
+        // Bezier Geometry (Quadratic)
+        // B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
+        // P0 = node1, P2 = node2, P1 = Control Point (center-pull)
+        
+        const t = p.t;
+        const mt = 1-t;
+        
+        // Screen Coordinates
+        const n1 = nodes[pair.p1];
+        const n2 = nodes[pair.p2];
+        const cp = pair.cp; // normalized CP
+        
+        // Apply "breathing" curvature based on band amplitude
+        // More energy = wider arcs
+        const curveMult = 1.0 + amp * 0.05;
+        
+        const sx = (mt*mt*n1.x + 2*mt*t*cp.x*curveMult + t*t*n2.x) * radius + cx;
+        const sy = (mt*mt*n1.y + 2*mt*t*cp.y*curveMult + t*t*n2.y) * radius + cy;
+        
+        // Draw
+        const size = (p.bandIdx > 2) ? 3 : 6; // Gamma is small/sharp, Theta is big
+        const alpha = Math.min(1, 0.2 + amp * 0.8);
+        const rgb = band.color;
+        
+        ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+        ctx.fillRect(sx, sy, size, size); // Faster than arc()
+    }
+    
+    requestAnimationFrame(animate);
+}
+
+// UI Handlers
+document.getElementById('btn-full').onclick = () => {
+    document.documentElement.requestFullscreen();
+};
+document.getElementById('btn-conn').onclick = connectBLE;
+
+</script>
+</body>
+</html>
