@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NeuroHolograph Web</title>
+    <style>
+        body { 
+            margin: 0; 
+            background-color: #000000; 
+            color: #ffffff; 
+            font-family: 'Courier New', Courier, monospace; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            height: 100vh;
+        }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9), rgba(0,0,0,0));
+            z-index: 10;
+            text-align: center;
+            pointer-events: none; /* Пропускать клики сквозь фон */
+        }
+
+        button { 
+            pointer-events: auto;
+            background: #00ffcc; 
+            color: #000; 
+            border: none; 
+            padding: 15px 40px; 
+            font-size: 18px; 
+            font-weight: bold; 
+            border-radius: 50px; 
+            cursor: pointer; 
+            box-shadow: 0 0 15px #00ffcc;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: transform 0.1s;
+        }
+        
+        button:active { transform: scale(0.95); }
+
+        #status-main { font-size: 24px; font-weight: bold; margin-top: 20px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        #status-sub { font-size: 14px; color: #888; margin-top: 5px; }
+        
+        canvas { 
+            display: block; 
+            width: 100vw; 
+            height: 100vw; 
+            max-width: 600px; 
+            max-height: 600px; 
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <button id="btn-connect">CONNECT BLE</button>
+        <div id="status-main">SYSTEM READY</div>
+        <div id="status-sub">Ensure Device is ON and Bluetooth/GPS Enabled</div>
+    </div>
+
+    <canvas id="radar"></canvas>
+
+<script>
+/** 
+ * ==========================================
+ * CONFIGURATION
+ * ==========================================
+ */
+const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const BLE_CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+const FS = 250;
+const CHANNELS = 8;
+const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
+const FFT_SIZE = 256; 
+
+// State
+let isConnected = false;
+let channelBuffers = Array.from({ length: CHANNELS }, () => new Float32Array(FFT_SIZE).fill(0));
+let packetBuffer = new Uint8Array(); // Accumulator for fragmented packets
+
+// UI
+const btn = document.getElementById('btn-connect');
+const statMain = document.getElementById('status-main');
+const statSub = document.getElementById('status-sub');
+const canvas = document.getElementById('radar');
+const ctx = canvas.getContext('2d');
+
+/** 
+ * ==========================================
+ * AUDIO ENGINE (Web Audio API)
+ * ==========================================
+ */
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioContext();
+let synthOsc, noiseGain, synthGain, panNode;
+
+function initAudio() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    // 1. Synth Drone (Sine)
+    synthOsc = audioCtx.createOscillator();
+    synthOsc.type = 'sine';
+    synthOsc.frequency.value = 100; // Base freq
+    
+    synthGain = audioCtx.createGain();
+    synthGain.gain.value = 0;
+
+    // 2. Muscle Noise (Pink/White)
+    const bufferSize = audioCtx.sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1);
+    }
+    
+    const noiseSrc = audioCtx.createBufferSource();
+    noiseSrc.buffer = buffer;
+    noiseSrc.loop = true;
+    
+    noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0;
+
+    // 3. Routing
+    panNode = audioCtx.createStereoPanner();
+    
+    synthOsc.connect(synthGain).connect(panNode);
+    noiseSrc.connect(noiseGain).connect(panNode);
+    panNode.connect(audioCtx.destination);
+
+    synthOsc.start();
+    noiseSrc.start();
+}
+
+/** 
+ * ==========================================
+ * BLE HANDLER (Robust Parser)
+ * ==========================================
+ */
+async function connectBLE() {
+    try {
+        initAudio(); // User interaction required here
+        
+        statMain.innerText = "SCANNING...";
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [BLE_SERVICE_UUID] }]
+        });
+
+        statMain.innerText = "CONNECTING...";
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(BLE_CHAR_UUID);
+
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', onDataReceived);
+
+        device.addEventListener('gattserverdisconnected', () => {
+            statMain.innerText = "DISCONNECTED";
+            statMain.style.color = "red";
+            btn.style.display = "inline-block";
+            isConnected = false;
+        });
+
+        btn.style.display = "none";
+        statMain.innerText = "STREAMING";
+        statMain.style.color = "#00ffcc";
+        statSub.innerText = "Processing Neural Data...";
+        isConnected = true;
+        
+        requestAnimationFrame(processLoop);
+
+    } catch (error) {
+        console.error(error);
+        statMain.innerText = "ERROR";
+        statMain.style.color = "red";
+        statSub.innerText = error.message;
+    }
+}
+
+function onDataReceived(event) {
+    const value = new Uint8Array(event.target.value.buffer);
+    
+    // Append new data to buffer
+    const temp = new Uint8Array(packetBuffer.length + value.length);
+    temp.set(packetBuffer);
+    temp.set(value, packetBuffer.length);
+    packetBuffer = temp;
+
+    // Process all complete packets in buffer
+    while (packetBuffer.length >= 33) {
+        // Find Header 0xA0
+        let headIdx = -1;
+        for(let i=0; i<packetBuffer.length; i++) {
+            if (packetBuffer[i] === 0xA0) { headIdx = i; break; }
+        }
+
+        // If no header found, flush garbage except last few bytes (edge case)
+        if (headIdx === -1) {
+            packetBuffer = packetBuffer.slice(-1); 
+            return;
+        }
+
+        // If header isn't at index 0, align buffer
+        if (headIdx > 0) {
+            packetBuffer = packetBuffer.slice(headIdx);
+            continue; // Re-check length
+        }
+
+        // Check Footer 0xC0 at index 32
+        if (packetBuffer.length >= 33) {
+            if (packetBuffer[32] === 0xC0) {
+                // VALID PACKET FOUND
+                parsePacket(packetBuffer.slice(0, 33));
+                packetBuffer = packetBuffer.slice(33); // Remove processed packet
+            } else {
+                // Invalid packet structure, remove the header and try finding next
+                packetBuffer = packetBuffer.slice(1);
+            }
+        } else {
+            // Wait for more data
+            break; 
+        }
+    }
+}
+
+function parsePacket(pkt) {
+    for (let i = 0; i < CHANNELS; i++) {
+        // 24-bit big endian signed parse
+        let val = (pkt[2 + i*3] << 16) | (pkt[3 + i*3] << 8) | pkt[4 + i*3];
+        if ((val & 0x800000) > 0) val = val - 0x1000000;
+        
+        const uV = val * UV_SCALE;
+        
+        // Push to Ring Buffer
+        channelBuffers[i].set(channelBuffers[i].subarray(1));
+        channelBuffers[i][FFT_SIZE-1] = uV;
+    }
+}
+
+/** 
+ * ==========================================
+ * DSP & VISUALIZATION LOOP
+ * ==========================================
+ */
+let w, h, cx, cy, rad;
+
+function resize() {
+    w = canvas.width = canvas.clientWidth * window.devicePixelRatio;
+    h = canvas.height = canvas.clientHeight * window.devicePixelRatio;
+    cx = w/2; cy = h/2;
+    rad = Math.min(cx, cy) * 0.95;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function processLoop() {
+    if (!isConnected) return;
+
+    // 1. SIGNAL PROCESSING
+    // Bipolar Montage (Ch[i] - Ch[i+1]) averaged
+    const meanSignal = new Float32Array(FFT_SIZE).fill(0);
+    
+    for (let i = 0; i < CHANNELS; i++) {
+        const next = (i + 1) % CHANNELS;
+        for (let t = 0; t < FFT_SIZE; t++) {
+            // Add bipolar difference to mean accumulator
+            meanSignal[t] += (channelBuffers[i][t] - channelBuffers[next][t]);
+        }
+    }
+    // Normalize
+    for (let t = 0; t < FFT_SIZE; t++) meanSignal[t] /= CHANNELS;
+
+    // 2. FFT
+    const fft = computeFFT(meanSignal);
+    
+    // 3. EXTRACT FEATURES
+    let alpha = 0, beta = 0, gamma = 0;
+    let maxMag = 0, domFreq = 0;
+
+    for (let i = 2; i < fft.mags.length; i++) {
+        const f = i * (FS / FFT_SIZE);
+        if (f > 60) break; // Limit to 60Hz
+
+        // Spectral Whitening (compensate 1/f)
+        const val = fft.mags[i] * (f * 0.5); 
+
+        if (f >= 8 && f <= 13) alpha += val;
+        if (f >= 15 && f <= 30) beta += val;
+        if (f >= 32 && f <= 55) gamma += val;
+
+        if (f < 35 && val > maxMag) { maxMag = val; domFreq = f; }
+    }
+
+    // ERD Ratio
+    const erd = alpha / (beta + 0.1);
+
+    // 4. UPDATE AUDIO
+    updateFeedback(erd, gamma, domFreq);
+
+    // 5. DRAW RADAR
+    drawHolograph(fft.mags, fft.phases, erd, gamma);
+
+    // 6. UPDATE TEXT STATUS
+    if (gamma > 200) {
+        statSub.innerText = "MUSCLE ARTIFACT DETECTED";
+        statSub.style.color = "red";
+    } else if (erd > 2.0) {
+        statSub.innerText = `ALPHA STATE | ERD: ${erd.toFixed(1)}`;
+        statSub.style.color = "#00ffcc";
+    } else {
+        statSub.innerText = `FOCUS STATE | ERD: ${erd.toFixed(1)}`;
+        statSub.style.color = "#aaaaaa";
+    }
+
+    requestAnimationFrame(processLoop);
+}
+
+function updateFeedback(erd, gamma, pitchFreq) {
+    const now = audioCtx.currentTime;
+    
+    // Gamma (Muscle) -> Noise Volume
+    let nVol = Math.min(0.5, gamma / 800.0);
+    noiseGain.gain.setTargetAtTime(nVol, now, 0.1);
+
+    // Alpha (Relax) -> Synth Volume
+    let sVol = 0;
+    if (nVol < 0.1) { // Only if no muscle noise
+        sVol = (erd > 1.5) ? Math.min(0.8, (erd - 1.5) * 0.5) : 0;
+    }
+    synthGain.gain.setTargetAtTime(sVol, now, 0.2);
+
+    // Pitch follows dominant freq (Theta/Alpha)
+    let targetPitch = 80 + (pitchFreq * 10);
+    synthOsc.frequency.setTargetAtTime(targetPitch, now, 0.2);
+}
+
+function drawHolograph(mags, phases, erd, gamma) {
+    // Fade effect
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
+    ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
+    ctx.arc(cx, cy, rad*0.75, 0, Math.PI*2);
+    ctx.stroke();
+
+    // Particles
+    for (let i = 3; i < mags.length; i++) {
+        const f = i * (FS / FFT_SIZE);
+        if (f > 60) break;
+
+        const amp = mags[i] * (f * 0.5); // Whitening
+        const phase = phases[i];
+        
+        // Polar coords
+        const r = (f / 60.0) * rad; // Frequency = Radius
+        const a = phase;            // Phase = Angle
+
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r;
+
+        // Size & Color
+        let size = Math.min(30, amp * 0.5);
+        let hue = 240 - (f * 3); // Blue (Low) -> Red (High)
+        let light = 50;
+
+        // Visual Feedback overrides
+        if (gamma > 200 && f > 30) { 
+            hue = 0; light = 70; // Red sparks for muscle
+        } else if (erd > 2.0 && f > 8 && f < 13) {
+            hue = 160; light = 80; size *= 2; // Bright Cyan for Alpha
+        }
+
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI*2);
+        ctx.fillStyle = `hsla(${hue}, 100%, ${light}%, ${Math.min(1, amp/20)})`;
+        ctx.fill();
+    }
+}
+
+// Simple FFT Implementation
+function computeFFT(signal) {
+    const N = signal.length;
+    const mags = new Float32Array(N/2);
+    const phases = new Float32Array(N/2);
+    
+    // Windowing (Hanning)
+    const windowed = new Float32Array(N);
+    for(let i=0; i<N; i++) windowed[i] = signal[i] * (0.5 * (1 - Math.cos(2*Math.PI*i/(N-1))));
+
+    // O(N^2) DFT - Slow but simple & self-contained for small N=256
+    for (let k = 0; k < N/2; k++) {
+        let re = 0, im = 0;
+        for (let n = 0; n < N; n++) {
+            const angle = (2 * Math.PI * k * n) / N;
+            re += windowed[n] * Math.cos(angle);
+            im -= windowed[n] * Math.sin(angle);
+        }
+        mags[k] = Math.sqrt(re*re + im*im);
+        phases[k] = Math.atan2(im, re);
+    }
+    return { mags, phases };
+}
+
+btn.addEventListener('click', connectBLE);
+
+</script>
+</body>
+</html>
