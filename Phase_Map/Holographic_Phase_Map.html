@@ -10,13 +10,12 @@
             background-color: #000; 
             color: #fff; 
             font-family: 'Courier New', monospace; 
-            overflow: hidden; /* Убираем скролл */
-            width: 100%;
-            height: 100%;
-            position: fixed; /* Фиксируем экран */
+            overflow: hidden; 
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
         }
         
-        /* Холст растягивается ровно по размеру окна браузера */
         canvas { 
             display: block; 
             width: 100%; 
@@ -93,7 +92,6 @@ let synthOsc, synthGain, noiseGain;
 function initAudio() {
     if(audioCtx.state === 'suspended') audioCtx.resume();
     
-    // Synth
     synthOsc = audioCtx.createOscillator();
     synthOsc.type = 'sine';
     synthOsc.frequency.value = 100;
@@ -102,7 +100,6 @@ function initAudio() {
     synthOsc.connect(synthGain).connect(audioCtx.destination);
     synthOsc.start();
 
-    // Noise
     const nBuf = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
     const d = nBuf.getChannelData(0);
     for(let i=0; i<d.length; i++) d[i] = Math.random()*2-1;
@@ -123,7 +120,7 @@ async function connectBLE() {
         document.getElementById('status-text').innerText = "SCANNING...";
         
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [BLE_SERVICE_UUID] }]
+            filters:[{ services: [BLE_SERVICE_UUID] }]
         });
 
         document.getElementById('status-text').innerText = "CONNECTING...";
@@ -141,7 +138,6 @@ async function connectBLE() {
             isConnected = false;
         });
 
-        // Hide UI
         document.getElementById('status-text').innerText = "CONNECTED";
         document.getElementById('ui-layer').style.opacity = 0;
         setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
@@ -190,24 +186,21 @@ function parsePacket(pkt) {
 
 // === RESIZE & DRAW ===
 const canvas = document.getElementById('radar');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 let w, h, cx, cy, rad;
 
 function resize() {
-    // Устанавливаем размер канваса точно по размеру окна
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     w = canvas.width;
     h = canvas.height;
     cx = w / 2;
     cy = h / 2;
-    // Радиус зависит от МЕНЬШЕЙ стороны экрана -> Всегда Круг
     rad = Math.min(cx, cy) * 0.95;
 }
 window.addEventListener('resize', resize);
-resize(); // Вызываем сразу
+resize();
 
-// Pre-calc Window
 const win = new Float32Array(FFT_SIZE);
 for(let i=0; i<FFT_SIZE; i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
 
@@ -230,7 +223,8 @@ function drawLoop() {
         let re=0, im=0;
         for(let n=0; n<FFT_SIZE; n++) {
             const phi = (2*Math.PI*k*n)/FFT_SIZE;
-            const v = sig[n] * win[n];
+            // ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ (signal[n] вместо sig[n])
+            const v = signal[n] * win[n]; 
             re += v * Math.cos(phi);
             im -= v * Math.sin(phi);
         }
@@ -270,7 +264,6 @@ function drawLoop() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
     ctx.fillRect(0, 0, w, h);
     
-    // Grid
     ctx.strokeStyle = '#003300';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -279,7 +272,6 @@ function drawLoop() {
     ctx.arc(cx, cy, rad*0.75, 0, Math.PI*2);
     ctx.stroke();
 
-    // Particles
     for(let k=4; k<mags.length; k++) {
         const f = k * (FS/FFT_SIZE);
         if(f > 100) break;
@@ -287,14 +279,12 @@ function drawLoop() {
         const m = mags[k] * (f * 0.4); 
         const ph = phases[k];
         
-        // Polar mapping - ИСПОЛЬЗУЕМ ОДИНАКОВЫЙ РАДИУС
         const r = (f / 100.0) * rad;
         const a = ph;
         
         const x = cx + Math.cos(a) * r;
         const y = cy + Math.sin(a) * r;
         
-        // Logic
         let hue = 240 - (f * 2.5);
         let size = 4 + m * 0.6;
         let bright = 50;
@@ -306,20 +296,16 @@ function drawLoop() {
             const opacity = 0.5 + Math.min(0.5, m/10);
             ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${opacity})`;
             
-            // Используем fillRect для скорости, но позиция строго по кругу
-            ctx.beginPath();
-            ctx.arc(x, y, size/2, 0, Math.PI*2);
-            ctx.fill();
+            // Используем fillRect вместо arc для максимальной плавности на мобилке
+            ctx.fillRect(x - size/2, y - size/2, size, size);
         }
     }
 
     requestAnimationFrame(drawLoop);
 }
 
-// Handlers
 document.getElementById('btn-full').onclick = () => {
     document.documentElement.requestFullscreen();
-    // Даем браузеру время переключиться, потом ресайзим
     setTimeout(resize, 500); 
 };
 document.getElementById('btn-connect').onclick = connectBLE;
