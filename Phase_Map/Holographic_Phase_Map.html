@@ -3,312 +3,316 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neuro Diagnostic</title>
+    <title>HoloMap Accelerated</title>
     <style>
         body { 
-            margin: 0; 
-            background-color: #000; 
-            color: #0f0; 
-            font-family: 'Courier New', monospace; 
-            overflow: hidden; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            height: 100vh;
+            margin: 0; background: #000; overflow: hidden; 
+            font-family: 'Courier New', monospace;
+            touch-action: none; /* Блокируем зум */
         }
+        canvas { display: block; width: 100vw; height: 100vh; }
         
         #ui-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            padding: 10px;
-            box-sizing: border-box;
-            background: rgba(0, 20, 0, 0.8);
-            z-index: 10;
-            text-align: left;
-            pointer-events: none;
-            border-bottom: 1px solid #0f0;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.85); z-index: 10;
+            transition: opacity 0.5s;
         }
-
-        button { 
-            pointer-events: auto;
-            background: #0f0; 
-            color: #000; 
-            border: none; 
-            padding: 10px 20px; 
-            font-size: 16px; 
-            font-weight: bold; 
-            margin-top: 10px;
-            cursor: pointer; 
-            width: 100%;
-        }
-
-        .debug-line { margin: 2px 0; font-size: 12px; }
-        .big-stat { font-size: 18px; font-weight: bold; color: #fff; margin: 5px 0; }
         
-        canvas { 
-            display: block; 
-            width: 100vw; 
-            height: 100vw; 
-            max-width: 600px; 
-            max-height: 600px; 
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+        button {
+            background: transparent; color: #00ffcc;
+            border: 2px solid #00ffcc; padding: 20px 40px;
+            font-size: 18px; font-weight: bold; border-radius: 50px;
+            margin: 15px; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
         }
+        button:active { background: #00ffcc; color: #000; }
+        
+        #hud {
+            position: absolute; top: 20px; left: 0; width: 100%;
+            text-align: center; pointer-events: none;
+            text-shadow: 0 0 5px #000;
+        }
+        .stat-main { font-size: 24px; font-weight: bold; color: #fff; }
+        .stat-sub { font-size: 14px; color: #aaa; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="ui-layer">
-        <div class="big-stat" id="status-main">DISCONNECTED</div>
-        <div class="debug-line" id="dbg-packets">Packets/sec: 0</div>
-        <div class="debug-line" id="dbg-bytes">Total Bytes: 0</div>
-        <div class="debug-line" id="dbg-raw">Ch1 Value: 0.00 uV</div>
-        <div class="debug-line" id="dbg-erd">ERD Ratio: 0.00</div>
-        <button id="btn-connect">CONNECT BLE</button>
+        <h1 style="color:white; margin-bottom:30px; text-shadow:0 0 10px #fff">HOLOGRAPHIC MAP</h1>
+        <button id="btn-full">1. FULLSCREEN</button>
+        <button id="btn-conn">2. CONNECT BLE</button>
     </div>
 
-    <canvas id="radar"></canvas>
+    <div id="hud">
+        <div class="stat-main" id="st-main">READY</div>
+        <div class="stat-sub" id="st-sub">Waiting for device...</div>
+    </div>
+
+    <canvas id="cvs"></canvas>
 
 <script>
 // === CONFIG ===
-const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const BLE_CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const FS = 250;
+const FFT_SIZE = 256;
 const CHANNELS = 8;
 const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
-const FFT_SIZE = 256; 
 
 // === STATE ===
 let isConnected = false;
-let channelBuffers = Array.from({ length: CHANNELS }, () => new Float32Array(FFT_SIZE).fill(0));
-let packetBuffer = new Uint8Array(); 
-let totalBytes = 0;
-let packetCount = 0;
-let lastPacketCount = 0;
+let packetBuffer = new Uint8Array();
+// Ring buffers for 8 channels
+let chBuffers = Array.from({length: 8}, () => new Float32Array(FFT_SIZE).fill(0));
 
-// === UI REFS ===
-const btn = document.getElementById('btn-connect');
-const uiStat = document.getElementById('status-main');
-const uiPackets = document.getElementById('dbg-packets');
-const uiBytes = document.getElementById('dbg-bytes');
-const uiRaw = document.getElementById('dbg-raw');
-const uiErd = document.getElementById('dbg-erd');
-const canvas = document.getElementById('radar');
-const ctx = canvas.getContext('2d');
-
-// === AUDIO (Minimal Drone) ===
+// === AUDIO ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let synthOsc, synthGain;
+let synthOsc, synthGain, noiseGain;
 
 function initAudio() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    
+    // Alpha Drone
     synthOsc = audioCtx.createOscillator();
+    synthGain = audioCtx.createGain();
+    synthOsc.connect(synthGain).connect(audioCtx.destination);
     synthOsc.type = 'sine';
     synthOsc.frequency.value = 100;
-    synthGain = audioCtx.createGain();
     synthGain.gain.value = 0;
-    synthOsc.connect(synthGain).connect(audioCtx.destination);
     synthOsc.start();
+
+    // Muscle Noise
+    const nBuf = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+    const d = nBuf.getChannelData(0);
+    for(let i=0; i<d.length; i++) d[i] = Math.random()*2-1;
+    
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = nBuf;
+    noise.loop = true;
+    noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0;
+    noise.connect(noiseGain).connect(audioCtx.destination);
+    noise.start();
 }
 
 // === BLE HANDLER ===
-async function connectBLE() {
+async function connect() {
     try {
         initAudio();
-        uiStat.innerText = "SCANNING...";
+        const dev = await navigator.bluetooth.requestDevice({
+            filters: [{services: [SERVICE_UUID]}]
+        });
         
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [BLE_SERVICE_UUID] }]
-        });
-
-        uiStat.innerText = "CONNECTING...";
-        const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-        const characteristic = await service.getCharacteristic(BLE_CHAR_UUID);
-
-        await characteristic.startNotifications();
-        characteristic.addEventListener('characteristicvaluechanged', onDataReceived);
-
-        device.addEventListener('gattserverdisconnected', () => {
-            uiStat.innerText = "DISCONNECTED";
-            uiStat.style.color = "red";
-            btn.style.display = "block";
-            isConnected = false;
-        });
-
-        btn.style.display = "none";
-        uiStat.innerText = "STREAMING ACTIVE";
-        uiStat.style.color = "#0f0";
+        const server = await dev.gatt.connect();
+        const svc = await server.getPrimaryService(SERVICE_UUID);
+        const char = await svc.getCharacteristic(CHAR_UUID);
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', onData);
+        
+        // Hide UI
+        document.getElementById('ui-layer').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui-layer').style.display='none', 500);
+        
         isConnected = true;
+        drawLoop();
         
-        // Запускаем таймер PPS (Packets Per Second)
-        setInterval(() => {
-            const pps = packetCount - lastPacketCount;
-            uiPackets.innerText = `Packets/sec: ${pps} (Target: 250)`;
-            lastPacketCount = packetCount;
-        }, 1000);
-
-        requestAnimationFrame(processLoop);
-
-    } catch (error) {
-        console.error(error);
-        uiStat.innerText = "ERROR: " + error.message;
+    } catch(e) {
+        alert("Connection error: " + e);
     }
 }
 
-function onDataReceived(event) {
-    const value = new Uint8Array(event.target.value.buffer);
-    totalBytes += value.length;
-    uiBytes.innerText = `Total Bytes: ${totalBytes}`;
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    const tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
 
-    // Append to buffer
-    const temp = new Uint8Array(packetBuffer.length + value.length);
-    temp.set(packetBuffer);
-    temp.set(value, packetBuffer.length);
-    packetBuffer = temp;
-
-    // Parse loop
-    while (packetBuffer.length >= 33) {
-        // Simple scanner: find 0xA0 then check +32 for 0xC0
-        let found = false;
-        for (let i = 0; i < packetBuffer.length - 32; i++) {
-            if (packetBuffer[i] === 0xA0 && packetBuffer[i+32] === 0xC0) {
-                // VALID PACKET
-                parsePacket(packetBuffer.slice(i, i+33));
-                packetBuffer = packetBuffer.slice(i + 33);
-                packetCount++;
-                found = true;
-                break; 
+    // Robust parsing (33 bytes)
+    while(packetBuffer.length >= 33) {
+        let head = -1;
+        // Find header 0xA0
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) {
+                head = i; break;
             }
         }
-        if (!found) {
+        
+        if(head === -1) {
             // Keep last 32 bytes just in case split happens there
-            if (packetBuffer.length > 100) packetBuffer = packetBuffer.slice(-32);
+            if(packetBuffer.length > 64) packetBuffer = packetBuffer.slice(-32);
             break;
         }
+        
+        if(head > 0) {
+            packetBuffer = packetBuffer.slice(head);
+            continue;
+        }
+
+        // Parse Packet
+        for(let c=0; c<8; c++) {
+            let v = (packetBuffer[2+c*3]<<16) | (packetBuffer[3+c*3]<<8) | packetBuffer[4+c*3];
+            if(v & 0x800000) v -= 0x1000000;
+            // Update Ring Buffer
+            chBuffers[c].set(chBuffers[c].subarray(1));
+            chBuffers[c][FFT_SIZE-1] = v * UV_SCALE;
+        }
+        
+        packetBuffer = packetBuffer.slice(33);
     }
 }
 
-function parsePacket(pkt) {
-    for (let i = 0; i < CHANNELS; i++) {
-        let val = (pkt[2 + i*3] << 16) | (pkt[3 + i*3] << 8) | pkt[4 + i*3];
-        if ((val & 0x800000) > 0) val = val - 0x1000000;
-        
-        const uV = val * UV_SCALE;
-        
-        // Ring buffer push
-        channelBuffers[i].set(channelBuffers[i].subarray(1));
-        channelBuffers[i][FFT_SIZE-1] = uV;
-    }
-}
-
-// === DSP & VISUALS ===
+// === DSP & RENDER ===
+const canvas = document.getElementById('cvs');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize
 let w, h, cx, cy, rad;
+
 function resize() {
-    w = canvas.width = canvas.clientWidth * window.devicePixelRatio;
-    h = canvas.height = canvas.clientHeight * window.devicePixelRatio;
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
     cx = w/2; cy = h/2;
-    rad = Math.min(cx, cy) * 0.9;
+    rad = Math.min(cx, cy) * 0.95;
 }
-window.addEventListener('resize', resize);
+window.onresize = resize;
 resize();
 
-function processLoop() {
-    if (!isConnected) { requestAnimationFrame(processLoop); return; }
+// Pre-calc window
+const win = new Float32Array(FFT_SIZE);
+for(let i=0; i<FFT_SIZE; i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
 
-    // 1. Get raw value for debug UI (Channel 0)
-    const rawVal = channelBuffers[0][FFT_SIZE-1];
-    uiRaw.innerText = `Ch1 Value: ${rawVal.toFixed(2)} uV`;
+function drawLoop() {
+    if(!isConnected) return;
 
-    // 2. Mean Signal (Average of all channels)
-    const signal = new Float32Array(FFT_SIZE);
-    for (let i = 0; i < FFT_SIZE; i++) {
-        let sum = 0;
-        for(let ch=0; ch<CHANNELS; ch++) sum += channelBuffers[ch][i];
-        signal[i] = sum / CHANNELS;
+    // 1. DSP: Average Bipolar Signal
+    const sig = new Float32Array(FFT_SIZE);
+    for(let i=0; i<FFT_SIZE; i++) {
+        let s = 0;
+        // Ch0-Ch1, Ch1-Ch2... Ring
+        for(let c=0; c<8; c++) {
+            s += (chBuffers[c][i] - chBuffers[(c+1)%8][i]);
+        }
+        sig[i] = s/8.0;
     }
 
-    // 3. FFT
-    const { mags, phases } = computeFFT(signal);
-
-    // 4. Draw Radar
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // Trails
-    ctx.fillRect(0, 0, w, h);
+    // 2. FFT
+    const mags = new Float32Array(FFT_SIZE/2);
+    const phases = new Float32Array(FFT_SIZE/2);
     
-    // Grid
-    ctx.strokeStyle = '#003300';
-    ctx.beginPath();
-    ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
-    ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
-    ctx.arc(cx, cy, rad*1.0, 0, Math.PI*2);
-    ctx.stroke();
-
-    let alpha = 0, beta = 0;
-
-    for (let i = 2; i < mags.length; i++) {
-        const f = i * (FS / FFT_SIZE);
-        if (f > 60) break;
-
-        const amp = mags[i];
-        if (f >= 8 && f <= 13) alpha += amp;
-        if (f >= 15 && f <= 30) beta += amp;
-
-        // Visuals
-        const angle = phases[i];
-        const dist = (f / 60.0) * rad;
-        const x = cx + Math.cos(angle) * dist;
-        const y = cy + Math.sin(angle) * dist;
-
-        // Force visibility: Minimum size 3px, minimum alpha 0.4
-        // This ensures we see NOISE even if signal is weak
-        const size = 3 + Math.min(15, amp); 
-        const opacity = 0.4 + Math.min(0.6, amp / 5.0);
-        
-        const hue = 240 - (f * 4); // Blue to Red
-        ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
-        
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI*2);
-        ctx.fill();
-    }
-
-    // 5. ERD Update
-    const erd = alpha / (beta + 0.01);
-    uiErd.innerText = `ERD Ratio: ${erd.toFixed(2)}`;
-    
-    // Audio Feedback (Alpha)
-    if (erd > 1.5) synthGain.gain.setTargetAtTime(0.3, audioCtx.currentTime, 0.1);
-    else synthGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
-
-    requestAnimationFrame(processLoop);
-}
-
-// Fast FFT
-function computeFFT(inData) {
-    const N = inData.length;
-    const mags = new Float32Array(N/2);
-    const phases = new Float32Array(N/2);
-    const win = new Float32Array(N);
-    for(let i=0;i<N;i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(N-1)));
-
-    for (let k=0; k<N/2; k++) {
+    for(let k=0; k<FFT_SIZE/2; k++) {
         let re=0, im=0;
-        for (let n=0; n<N; n++) {
-            const phi = (2*Math.PI*k*n)/N;
-            re += inData[n]*win[n]*Math.cos(phi);
-            im -= inData[n]*win[n]*Math.sin(phi);
+        for(let n=0; n<FFT_SIZE; n++) {
+            const phi = (2*Math.PI*k*n)/FFT_SIZE;
+            const v = sig[n] * win[n];
+            re += v * Math.cos(phi);
+            im -= v * Math.sin(phi);
         }
         mags[k] = Math.sqrt(re*re + im*im);
         phases[k] = Math.atan2(im, re);
     }
-    return { mags, phases };
+
+    // 3. FEATURES
+    let alpha=0, beta=0, gamma=0;
+    let domF=0, maxM=0;
+    
+    // Start from 2Hz (index 2)
+    for(let k=2; k<mags.length; k++) {
+        const f = k * (FS/FFT_SIZE);
+        if(f > 70) break;
+        
+        // Whitening for visualization
+        const m = mags[k] * (f * 0.5);
+        
+        if(f>=8 && f<=13) alpha += m;
+        if(f>=15 && f<=30) beta += m;
+        if(f>=35) gamma += m;
+        
+        if(f<35 && m>maxM) { maxM=m; domF=f; }
+    }
+    
+    const erd = alpha / (beta + 0.1);
+
+    // 4. AUDIO FEEDBACK
+    const now = audioCtx.currentTime;
+    if(gamma > 200) {
+        // Muscle
+        noiseGain.gain.setTargetAtTime(0.3, now, 0.1);
+        synthGain.gain.setTargetAtTime(0, now, 0.1);
+        document.getElementById('st-main').innerText = "MUSCLE EMG";
+        document.getElementById('st-main').style.color = "#ff0055";
+    } else {
+        // Neuro
+        noiseGain.gain.setTargetAtTime(0, now, 0.2);
+        
+        let vol = (erd > 1.5) ? Math.min(0.8, (erd-1.5)*0.5) : 0;
+        synthGain.gain.setTargetAtTime(vol, now, 0.3);
+        synthOsc.frequency.setTargetAtTime(80 + domF*8, now, 0.3);
+        
+        document.getElementById('st-main').innerText = (erd > 1.5) ? "ALPHA STATE" : "FOCUS STATE";
+        document.getElementById('st-main').style.color = (erd > 1.5) ? "#00ffcc" : "#aaaaaa";
+    }
+    document.getElementById('st-sub').innerText = `ERD: ${erd.toFixed(2)} | Peak: ${domF.toFixed(1)} Hz`;
+
+    // 5. RENDER (ACCELERATED)
+    
+    // Trail effect (Fade)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; // Fast fade
+    ctx.fillRect(0, 0, w, h);
+    
+    // Grid
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
+    ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
+    ctx.arc(cx, cy, rad*0.75, 0, Math.PI*2);
+    ctx.stroke();
+
+    // Spectrum Particles
+    for(let k=4; k<mags.length; k++) {
+        const f = k * (FS/FFT_SIZE);
+        if(f > 100) break;
+        
+        // Data
+        const m = mags[k] * (f * 0.4); // Whitening
+        const ph = phases[k];
+        
+        // Polar Pos
+        const r = (f / 100.0) * rad;
+        const a = ph;
+        
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r;
+        
+        // Visualization Logic
+        let hue = 240 - (f * 2.5); // Blue -> Red
+        let size = 3 + m * 0.5;
+        let bright = 50;
+        
+        if(gamma > 200 && f > 30) {
+            hue = 0; bright = 70; // Red sparks
+        } else if(erd > 2.0 && f>=8 && f<=13) {
+            hue = 170; bright = 80; size *= 1.5; // Cyan glow
+        }
+        
+        if(m > 1.0) { // Threshold to draw
+            ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${Math.min(1, m/10)})`;
+            // Square is faster than Arc on mobile GPU
+            const s2 = size/2;
+            ctx.fillRect(x-s2, y-s2, size, size);
+        }
+    }
+
+    requestAnimationFrame(drawLoop);
 }
 
-btn.addEventListener('click', connectBLE);
+// UI
+document.getElementById('btn-full').onclick = () => document.documentElement.requestFullscreen();
+document.getElementById('btn-conn').onclick = connect;
+
 </script>
 </body>
 </html>
