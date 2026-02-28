@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neuro Radar Fixed</title>
+    <title>Neuro Performance Stable</title>
     <style>
         body { 
             margin: 0; 
             background-color: #000; 
-            color: #fff; 
+            color: #0f0; 
             font-family: 'Courier New', monospace; 
             overflow: hidden; 
             width: 100vw;
             height: 100vh;
-            position: fixed;
+            position: fixed; /* Предотвращает скролл на мобилках */
         }
         
         canvas { 
@@ -21,16 +21,18 @@
             width: 100%; 
             height: 100%; 
         }
-        
+
         #ui-layer {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            z-index: 10;
-            text-align: center;
-            transition: opacity 0.5s;
             width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+            transition: opacity 0.5s;
         }
 
         button { 
@@ -41,32 +43,30 @@
             padding: 20px 40px; 
             font-size: 20px; 
             font-weight: bold; 
-            border-radius: 50px;
-            cursor: pointer; 
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-            text-transform: uppercase;
-            backdrop-filter: blur(5px);
             margin: 10px;
+            cursor: pointer; 
+            border-radius: 50px;
+            text-transform: uppercase;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.2);
+            backdrop-filter: blur(5px);
         }
-        
+
         button:active { background: #0f0; color: #000; }
 
-        #status-text {
-            font-size: 16px;
-            color: #aaa;
-            margin-bottom: 20px;
-            text-shadow: 0 0 5px #000;
+        h1 {
+            color: #fff;
+            text-shadow: 0 0 10px #fff;
+            margin-bottom: 30px;
+            text-align: center;
         }
     </style>
 </head>
 <body>
 
     <div id="ui-layer">
-        <h1 style="text-shadow: 0 0 15px #fff;">NEURO RADAR</h1>
-        <div id="status-text">SYSTEM READY</div>
+        <h1>NEURO PERFORMANCE</h1>
         <button id="btn-full">1. FULLSCREEN</button>
-        <br>
-        <button id="btn-connect">2. CONNECT</button>
+        <button id="btn-connect">2. CONNECT BLE</button>
     </div>
 
     <canvas id="radar"></canvas>
@@ -76,22 +76,23 @@
 const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const BLE_CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const FS = 250;
-const FFT_SIZE = 256; 
 const CHANNELS = 8;
 const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
+const FFT_SIZE = 256; 
 
 // === STATE ===
 let isConnected = false;
-let packetBuffer = new Uint8Array();
-let chBuffers = Array.from({length: 8}, () => new Float32Array(FFT_SIZE).fill(0));
+let channelBuffers = Array.from({ length: CHANNELS }, () => new Float32Array(FFT_SIZE).fill(0));
+let packetBuffer = new Uint8Array(); 
 
-// === AUDIO ===
+// === AUDIO ENGINE ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let synthOsc, synthGain, noiseGain;
 
 function initAudio() {
-    if(audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     
+    // Синтезатор (Писк/Тон)
     synthOsc = audioCtx.createOscillator();
     synthOsc.type = 'sine';
     synthOsc.frequency.value = 100;
@@ -100,10 +101,10 @@ function initAudio() {
     synthOsc.connect(synthGain).connect(audioCtx.destination);
     synthOsc.start();
 
+    // Шум мышц (EMG)
     const nBuf = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
     const d = nBuf.getChannelData(0);
     for(let i=0; i<d.length; i++) d[i] = Math.random()*2-1;
-    
     const noise = audioCtx.createBufferSource();
     noise.buffer = nBuf;
     noise.loop = true;
@@ -113,17 +114,18 @@ function initAudio() {
     noise.start();
 }
 
-// === BLE ===
+// === BLE HANDLER (РОДНОЙ ПАРСЕР ИЗ ТВОЕГО ФАЙЛА) ===
 async function connectBLE() {
     try {
         initAudio();
-        document.getElementById('status-text').innerText = "SCANNING...";
+        const btn = document.getElementById('btn-connect');
+        btn.innerText = "SCANNING...";
         
         const device = await navigator.bluetooth.requestDevice({
             filters:[{ services: [BLE_SERVICE_UUID] }]
         });
 
-        document.getElementById('status-text').innerText = "CONNECTING...";
+        btn.innerText = "CONNECTING...";
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         const characteristic = await service.getCharacteristic(BLE_CHAR_UUID);
@@ -132,26 +134,28 @@ async function connectBLE() {
         characteristic.addEventListener('characteristicvaluechanged', onDataReceived);
 
         device.addEventListener('gattserverdisconnected', () => {
-            document.getElementById('status-text').innerText = "DISCONNECTED";
             document.getElementById('ui-layer').style.opacity = 1;
-            document.getElementById('ui-layer').style.display = 'block';
+            document.getElementById('ui-layer').style.pointerEvents = 'auto';
+            btn.innerText = "RECONNECT";
             isConnected = false;
         });
 
-        document.getElementById('status-text').innerText = "CONNECTED";
+        // Прячем UI для перформанса
         document.getElementById('ui-layer').style.opacity = 0;
-        setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
+        document.getElementById('ui-layer').style.pointerEvents = 'none';
         
         isConnected = true;
-        drawLoop();
+        requestAnimationFrame(processLoop);
 
     } catch (error) {
-        alert("Error: " + error.message);
+        alert("Connection Error: " + error.message);
+        document.getElementById('btn-connect').innerText = "CONNECT BLE";
     }
 }
 
 function onDataReceived(event) {
     const value = new Uint8Array(event.target.value.buffer);
+
     const temp = new Uint8Array(packetBuffer.length + value.length);
     temp.set(packetBuffer);
     temp.set(value, packetBuffer.length);
@@ -178,89 +182,70 @@ function parsePacket(pkt) {
     for (let i = 0; i < CHANNELS; i++) {
         let val = (pkt[2 + i*3] << 16) | (pkt[3 + i*3] << 8) | pkt[4 + i*3];
         if ((val & 0x800000) > 0) val = val - 0x1000000;
+        
         const uV = val * UV_SCALE;
-        chBuffers[i].set(chBuffers[i].subarray(1));
-        chBuffers[i][FFT_SIZE-1] = uV;
+        
+        channelBuffers[i].set(channelBuffers[i].subarray(1));
+        channelBuffers[i][FFT_SIZE-1] = uV;
     }
 }
 
-// === RESIZE & DRAW ===
+// === CANVAS & DSP ===
 const canvas = document.getElementById('radar');
-const ctx = canvas.getContext('2d', { alpha: false });
+const ctx = canvas.getContext('2d');
 let w, h, cx, cy, rad;
 
 function resize() {
+    // Гарантируем правильные пропорции (без сплющивания)
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     w = canvas.width;
     h = canvas.height;
     cx = w / 2;
     cy = h / 2;
-    rad = Math.min(cx, cy) * 0.95;
+    // Радиус по меньшей стороне, чтобы круг всегда был кругом
+    rad = Math.min(cx, cy) * 0.9; 
 }
 window.addEventListener('resize', resize);
 resize();
 
-const win = new Float32Array(FFT_SIZE);
-for(let i=0; i<FFT_SIZE; i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
+// Fast FFT (Родной из твоего файла)
+function computeFFT(inData) {
+    const N = inData.length;
+    const mags = new Float32Array(N/2);
+    const phases = new Float32Array(N/2);
+    const win = new Float32Array(N);
+    for(let i=0;i<N;i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(N-1)));
 
-function drawLoop() {
-    if(!isConnected) return;
-
-    // 1. DSP
-    const signal = new Float32Array(FFT_SIZE);
-    for(let i=0; i<FFT_SIZE; i++) {
-        let sum = 0;
-        for(let c=0; c<CHANNELS; c++) sum += chBuffers[c][i];
-        signal[i] = sum / CHANNELS;
-    }
-
-    // 2. FFT
-    const mags = new Float32Array(FFT_SIZE/2);
-    const phases = new Float32Array(FFT_SIZE/2);
-    
-    for(let k=0; k<FFT_SIZE/2; k++) {
+    for (let k=0; k<N/2; k++) {
         let re=0, im=0;
-        for(let n=0; n<FFT_SIZE; n++) {
-            const phi = (2*Math.PI*k*n)/FFT_SIZE;
-            const v = signal[n] * win[n]; 
-            re += v * Math.cos(phi);
-            im -= v * Math.sin(phi);
+        for (let n=0; n<N; n++) {
+            const phi = (2*Math.PI*k*n)/N;
+            re += inData[n]*win[n]*Math.cos(phi);
+            im -= inData[n]*win[n]*Math.sin(phi);
         }
         mags[k] = Math.sqrt(re*re + im*im);
         phases[k] = Math.atan2(im, re);
     }
+    return { mags, phases };
+}
 
-    // 3. ANALYSIS
-    let alpha=0, beta=0, gamma=0, domF=0, maxM=0;
-    
-    for(let k=2; k<mags.length; k++) {
-        const f = k * (FS/FFT_SIZE);
-        if(f > 70) break;
-        const m = mags[k] * (f * 0.5); // Whitening
-        
-        if(f>=8 && f<=13) alpha += m;
-        if(f>=15 && f<=30) beta += m;
-        if(f>=35) gamma += m;
-        
-        if(f<35 && m>maxM) { maxM=m; domF=f; }
-    }
-    const erd = alpha / (beta + 0.1);
+function processLoop() {
+    if (!isConnected) { requestAnimationFrame(processLoop); return; }
 
-    // 4. AUDIO
-    const now = audioCtx.currentTime;
-    if(gamma > 200) {
-        noiseGain.gain.setTargetAtTime(0.3, now, 0.1);
-        synthGain.gain.setTargetAtTime(0, now, 0.1);
-    } else {
-        noiseGain.gain.setTargetAtTime(0, now, 0.1);
-        let vol = (erd > 1.5) ? Math.min(0.8, (erd-1.5)*0.5) : 0;
-        synthGain.gain.setTargetAtTime(vol, now, 0.2);
-        synthOsc.frequency.setTargetAtTime(80 + domF*8, now, 0.2);
+    // 1. Усреднение сигнала
+    const signal = new Float32Array(FFT_SIZE);
+    for (let i = 0; i < FFT_SIZE; i++) {
+        let sum = 0;
+        for(let ch=0; ch<CHANNELS; ch++) sum += channelBuffers[ch][i];
+        signal[i] = sum / CHANNELS;
     }
 
-    // 5. RENDER
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'; // Чуть более плотный хвост
+    // 2. FFT
+    const { mags, phases } = computeFFT(signal);
+
+    // 3. Отрисовка фона и сетки (Хвосты частиц)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
     ctx.fillRect(0, 0, w, h);
     
     ctx.strokeStyle = '#003300';
@@ -268,57 +253,66 @@ function drawLoop() {
     ctx.beginPath();
     ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
     ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
-    ctx.arc(cx, cy, rad*0.75, 0, Math.PI*2);
+    ctx.arc(cx, cy, rad*1.0, 0, Math.PI*2);
     ctx.stroke();
 
-    for(let k=4; k<mags.length; k++) {
-        const f = k * (FS/FFT_SIZE);
-        if(f > 100) break;
+    let alpha = 0, beta = 0, gamma = 0, domF = 0, maxM = 0;
+
+    // 4. Отрисовка частиц (Математика ТОЧНО из рабочего файла)
+    for (let i = 2; i < mags.length; i++) {
+        const f = i * (FS / FFT_SIZE);
+        if (f > 60) break;
+
+        const amp = mags[i];
+        if (f >= 8 && f <= 13) alpha += amp;
+        if (f >= 15 && f <= 30) beta += amp;
+        if (f >= 35) gamma += amp;
         
-        const m = mags[k] * (f * 0.4); 
-        const ph = phases[k];
+        if (f < 35 && amp > maxM) { maxM = amp; domF = f; }
+
+        const angle = phases[i];
+        const dist = (f / 60.0) * rad;
+        const x = cx + Math.cos(angle) * dist;
+        const y = cy + Math.sin(angle) * dist;
+
+        // РОДНЫЕ ПАРАМЕТРЫ ВИЗУАЛИЗАЦИИ
+        const size = 3 + Math.min(15, amp); 
+        const opacity = 0.4 + Math.min(0.6, amp / 5.0);
+        const hue = 240 - (f * 4); 
         
-        const r = (f / 100.0) * rad;
-        const a = ph;
+        ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    // 5. AUDIO FEEDBACK (Писк и Шум)
+    const erd = alpha / (beta + 0.01);
+    
+    if (gamma > 150) { 
+        // Мышцы = Шум водопада
+        noiseGain.gain.setTargetAtTime(0.4, audioCtx.currentTime, 0.1);
+        synthGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+    } else {
+        noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
         
-        const x = cx + Math.cos(a) * r;
-        const y = cy + Math.sin(a) * r;
-        
-        let hue = 240 - (f * 2.5);
-        
-        // ЖЕСТКИЙ ЛИМИТ РАЗМЕРА: базовая точка 2px, максимум 15px.
-        let ptRadius = 2 + Math.min(13, m * 0.1);
-        let bright = 50;
-        
-        if(gamma > 200 && f > 30) { 
-            hue = 0; 
-            bright = 60; 
-            // Для мышц размер чуть больше, но тоже лимитирован
-            ptRadius = 3 + Math.min(12, m * 0.05); 
-        }
-        else if(erd > 2.0 && f>=8 && f<=13) { 
-            hue = 170; 
-            bright = 80; 
-            ptRadius *= 1.5; 
-        }
-        
-        if(m > 0.5) {
-            const opacity = 0.4 + Math.min(0.5, m/15);
-            ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${opacity})`;
-            
-            // Возвращаем красивые круги!
-            ctx.beginPath();
-            ctx.arc(x, y, ptRadius, 0, Math.PI*2);
-            ctx.fill();
+        if (erd > 1.2) { 
+            // Нейро-активность = Писк/Дрон (зависит от доминирующей частоты)
+            synthGain.gain.setTargetAtTime(0.3, audioCtx.currentTime, 0.1);
+            synthOsc.frequency.setTargetAtTime(100 + domF * 10, audioCtx.currentTime, 0.1);
+        } else {
+            // Тишина
+            synthGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
         }
     }
 
-    requestAnimationFrame(drawLoop);
+    requestAnimationFrame(processLoop);
 }
 
+// UI Handlers
 document.getElementById('btn-full').onclick = () => {
     document.documentElement.requestFullscreen();
-    setTimeout(resize, 500); 
+    setTimeout(resize, 500); // Ресайз после разворачивания
 };
 document.getElementById('btn-connect').onclick = connectBLE;
 
