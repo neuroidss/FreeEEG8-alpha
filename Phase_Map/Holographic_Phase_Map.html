@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HoloMap Accelerated</title>
+    <title>HoloRadar Optimized</title>
     <style>
         body { 
             margin: 0; background: #000; overflow: hidden; 
@@ -12,7 +12,7 @@
         }
         canvas { display: block; width: 100vw; height: 100vh; }
         
-        #ui-layer {
+        #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             background: rgba(0,0,0,0.85); z-index: 10;
@@ -20,40 +20,41 @@
         }
         
         button {
-            background: transparent; color: #00ffcc;
+            background: rgba(0, 255, 204, 0.1); color: #00ffcc;
             border: 2px solid #00ffcc; padding: 20px 40px;
-            font-size: 18px; font-weight: bold; border-radius: 50px;
+            font-size: 20px; font-weight: bold; border-radius: 50px;
             margin: 15px; cursor: pointer; text-transform: uppercase;
-            box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            backdrop-filter: blur(5px);
         }
         button:active { background: #00ffcc; color: #000; }
         
         #hud {
-            position: absolute; top: 20px; left: 0; width: 100%;
+            position: absolute; bottom: 20px; left: 0; width: 100%;
             text-align: center; pointer-events: none;
-            text-shadow: 0 0 5px #000;
+            text-shadow: 0 0 2px #000;
         }
-        .stat-main { font-size: 24px; font-weight: bold; color: #fff; }
-        .stat-sub { font-size: 14px; color: #aaa; margin-top: 5px; }
+        .stat-main { font-size: 16px; color: #888; }
+        .stat-val { color: #fff; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <h1 style="color:white; margin-bottom:30px; text-shadow:0 0 10px #fff">HOLOGRAPHIC MAP</h1>
-        <button id="btn-full">1. FULLSCREEN</button>
-        <button id="btn-conn">2. CONNECT BLE</button>
-    </div>
+<div id="ui">
+    <h1 style="color:white; text-shadow: 0 0 10px #fff; margin-bottom: 40px;">HOLO-RADAR GPU</h1>
+    <button id="btn-full">1. GO FULLSCREEN</button>
+    <button id="btn-conn">2. CONNECT BLE</button>
+</div>
 
-    <div id="hud">
-        <div class="stat-main" id="st-main">READY</div>
-        <div class="stat-sub" id="st-sub">Waiting for device...</div>
-    </div>
+<div id="hud">
+    <span class="stat-main">STATUS: <span id="st-conn" class="stat-val">WAITING</span></span> |
+    <span class="stat-main">ERD: <span id="st-erd" class="stat-val">0.0</span></span>
+</div>
 
-    <canvas id="cvs"></canvas>
+<canvas id="cvs"></canvas>
 
 <script>
-// === CONFIG ===
+// === CONFIGURATION ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const FS = 250;
@@ -62,12 +63,11 @@ const CHANNELS = 8;
 const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
 
 // === STATE ===
-let isConnected = false;
+let isRunning = false;
 let packetBuffer = new Uint8Array();
-// Ring buffers for 8 channels
 let chBuffers = Array.from({length: 8}, () => new Float32Array(FFT_SIZE).fill(0));
 
-// === AUDIO ===
+// === AUDIO ENGINE ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let synthOsc, synthGain, noiseGain;
 
@@ -97,30 +97,30 @@ function initAudio() {
     noise.start();
 }
 
-// === BLE HANDLER ===
-async function connect() {
+// === BLE CONNECTION (Proven Working Parser) ===
+async function connectBLE() {
     try {
         initAudio();
-        const dev = await navigator.bluetooth.requestDevice({
-            filters: [{services: [SERVICE_UUID]}]
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
         });
-        
-        const server = await dev.gatt.connect();
-        const svc = await server.getPrimaryService(SERVICE_UUID);
-        const char = await svc.getCharacteristic(CHAR_UUID);
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const char = await service.getCharacteristic(CHAR_UUID);
         
         await char.startNotifications();
         char.addEventListener('characteristicvaluechanged', onData);
         
-        // Hide UI
-        document.getElementById('ui-layer').style.opacity = 0;
-        setTimeout(() => document.getElementById('ui-layer').style.display='none', 500);
+        // UI Transition
+        document.getElementById('ui').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui').style.display = 'none', 500);
+        document.getElementById('st-conn').innerText = "STREAMING";
+        document.getElementById('st-conn').style.color = "#00ffcc";
         
-        isConnected = true;
+        isRunning = true;
         drawLoop();
-        
     } catch(e) {
-        alert("Connection error: " + e);
+        alert("Connection Error: " + e);
     }
 }
 
@@ -129,11 +129,10 @@ function onData(e) {
     const tmp = new Uint8Array(packetBuffer.length + val.length);
     tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
     packetBuffer = tmp;
-
-    // Robust parsing (33 bytes)
+    
+    // Robust parsing loop from Hyper-Web
     while(packetBuffer.length >= 33) {
         let head = -1;
-        // Find header 0xA0
         for(let i=0; i<packetBuffer.length-32; i++) {
             if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) {
                 head = i; break;
@@ -141,8 +140,7 @@ function onData(e) {
         }
         
         if(head === -1) {
-            // Keep last 32 bytes just in case split happens there
-            if(packetBuffer.length > 64) packetBuffer = packetBuffer.slice(-32);
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33);
             break;
         }
         
@@ -150,23 +148,23 @@ function onData(e) {
             packetBuffer = packetBuffer.slice(head);
             continue;
         }
-
-        // Parse Packet
-        for(let c=0; c<8; c++) {
-            let v = (packetBuffer[2+c*3]<<16) | (packetBuffer[3+c*3]<<8) | packetBuffer[4+c*3];
+        
+        // Parse 8 channels
+        for(let ch=0; ch<8; ch++) {
+            let v = (packetBuffer[2+ch*3]<<16) | (packetBuffer[3+ch*3]<<8) | packetBuffer[4+ch*3];
             if(v & 0x800000) v -= 0x1000000;
             // Update Ring Buffer
-            chBuffers[c].set(chBuffers[c].subarray(1));
-            chBuffers[c][FFT_SIZE-1] = v * UV_SCALE;
+            chBuffers[ch].set(chBuffers[ch].subarray(1));
+            chBuffers[ch][FFT_SIZE-1] = v * UV_SCALE;
         }
         
         packetBuffer = packetBuffer.slice(33);
     }
 }
 
-// === DSP & RENDER ===
+// === RENDER & DSP ===
 const canvas = document.getElementById('cvs');
-const ctx = canvas.getContext('2d', { alpha: false }); // Optimize
+const ctx = canvas.getContext('2d', { alpha: false });
 let w, h, cx, cy, rad;
 
 function resize() {
@@ -178,21 +176,19 @@ function resize() {
 window.onresize = resize;
 resize();
 
-// Pre-calc window
+// Pre-calc Window
 const win = new Float32Array(FFT_SIZE);
 for(let i=0; i<FFT_SIZE; i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
 
 function drawLoop() {
-    if(!isConnected) return;
+    if(!isRunning) return;
 
-    // 1. DSP: Average Bipolar Signal
+    // 1. DSP: Calculate Mean Signal (Common mode rejection via averaging)
     const sig = new Float32Array(FFT_SIZE);
+    // Use simple averaging or bipolar loop. Bipolar is cleaner:
     for(let i=0; i<FFT_SIZE; i++) {
         let s = 0;
-        // Ch0-Ch1, Ch1-Ch2... Ring
-        for(let c=0; c<8; c++) {
-            s += (chBuffers[c][i] - chBuffers[(c+1)%8][i]);
-        }
+        for(let c=0; c<8; c++) s += (chBuffers[c][i] - chBuffers[(c+1)%8][i]);
         sig[i] = s/8.0;
     }
 
@@ -212,17 +208,14 @@ function drawLoop() {
         phases[k] = Math.atan2(im, re);
     }
 
-    // 3. FEATURES
+    // 3. Audio & Metrics
     let alpha=0, beta=0, gamma=0;
     let domF=0, maxM=0;
     
-    // Start from 2Hz (index 2)
     for(let k=2; k<mags.length; k++) {
         const f = k * (FS/FFT_SIZE);
         if(f > 70) break;
-        
-        // Whitening for visualization
-        const m = mags[k] * (f * 0.5);
+        const m = mags[k] * (f * 0.5); // Whitening
         
         if(f>=8 && f<=13) alpha += m;
         if(f>=15 && f<=30) beta += m;
@@ -230,39 +223,42 @@ function drawLoop() {
         
         if(f<35 && m>maxM) { maxM=m; domF=f; }
     }
-    
     const erd = alpha / (beta + 0.1);
+    document.getElementById('st-erd').innerText = erd.toFixed(2);
 
-    // 4. AUDIO FEEDBACK
+    // Audio Feedback
     const now = audioCtx.currentTime;
     if(gamma > 200) {
-        // Muscle
         noiseGain.gain.setTargetAtTime(0.3, now, 0.1);
         synthGain.gain.setTargetAtTime(0, now, 0.1);
-        document.getElementById('st-main').innerText = "MUSCLE EMG";
-        document.getElementById('st-main').style.color = "#ff0055";
+        document.getElementById('st-conn').style.color = "red";
+        document.getElementById('st-conn').innerText = "MUSCLE";
     } else {
-        // Neuro
         noiseGain.gain.setTargetAtTime(0, now, 0.2);
-        
         let vol = (erd > 1.5) ? Math.min(0.8, (erd-1.5)*0.5) : 0;
-        synthGain.gain.setTargetAtTime(vol, now, 0.3);
-        synthOsc.frequency.setTargetAtTime(80 + domF*8, now, 0.3);
+        synthGain.gain.setTargetAtTime(vol, now, 0.2);
+        synthOsc.frequency.setTargetAtTime(80 + domF*8, now, 0.2);
         
-        document.getElementById('st-main').innerText = (erd > 1.5) ? "ALPHA STATE" : "FOCUS STATE";
-        document.getElementById('st-main').style.color = (erd > 1.5) ? "#00ffcc" : "#aaaaaa";
+        if(erd > 1.5) {
+            document.getElementById('st-conn').style.color = "#00ffcc";
+            document.getElementById('st-conn').innerText = "ALPHA";
+        } else {
+            document.getElementById('st-conn').style.color = "#aaa";
+            document.getElementById('st-conn').innerText = "FOCUS";
+        }
     }
-    document.getElementById('st-sub').innerText = `ERD: ${erd.toFixed(2)} | Peak: ${domF.toFixed(1)} Hz`;
 
-    // 5. RENDER (ACCELERATED)
+    // 4. RENDER (GPU Accelerated)
     
-    // Trail effect (Fade)
+    // Trails
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; // Fast fade
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'; 
     ctx.fillRect(0, 0, w, h);
     
-    // Grid
+    // Additive Glow
     ctx.globalCompositeOperation = 'lighter';
+    
+    // Grid
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -271,47 +267,41 @@ function drawLoop() {
     ctx.arc(cx, cy, rad*0.75, 0, Math.PI*2);
     ctx.stroke();
 
-    // Spectrum Particles
+    // Radar Particles
     for(let k=4; k<mags.length; k++) {
         const f = k * (FS/FFT_SIZE);
         if(f > 100) break;
         
-        // Data
         const m = mags[k] * (f * 0.4); // Whitening
         const ph = phases[k];
         
-        // Polar Pos
         const r = (f / 100.0) * rad;
-        const a = ph;
+        const a = ph; // Phase = Angle
         
         const x = cx + Math.cos(a) * r;
         const y = cy + Math.sin(a) * r;
         
-        // Visualization Logic
-        let hue = 240 - (f * 2.5); // Blue -> Red
+        // Color Mapping
+        let hue = 240 - (f * 2.5);
         let size = 3 + m * 0.5;
         let bright = 50;
         
-        if(gamma > 200 && f > 30) {
-            hue = 0; bright = 70; // Red sparks
-        } else if(erd > 2.0 && f>=8 && f<=13) {
-            hue = 170; bright = 80; size *= 1.5; // Cyan glow
-        }
+        if(gamma > 200 && f > 30) { hue=0; bright=70; } // EMG
+        else if(erd > 2.0 && f>=8 && f<=13) { hue=170; bright=80; size*=1.5; } // Alpha
         
-        if(m > 1.0) { // Threshold to draw
+        if(m > 1.0) {
             ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${Math.min(1, m/10)})`;
-            // Square is faster than Arc on mobile GPU
-            const s2 = size/2;
-            ctx.fillRect(x-s2, y-s2, size, size);
+            // Using fillRect for speed
+            ctx.fillRect(x - size/2, y - size/2, size, size);
         }
     }
 
     requestAnimationFrame(drawLoop);
 }
 
-// UI
+// UI Handlers
 document.getElementById('btn-full').onclick = () => document.documentElement.requestFullscreen();
-document.getElementById('btn-conn').onclick = connect;
+document.getElementById('btn-conn').onclick = connectBLE;
 
 </script>
 </body>
