@@ -223,7 +223,6 @@ function drawLoop() {
         let re=0, im=0;
         for(let n=0; n<FFT_SIZE; n++) {
             const phi = (2*Math.PI*k*n)/FFT_SIZE;
-            // ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ (signal[n] вместо sig[n])
             const v = signal[n] * win[n]; 
             re += v * Math.cos(phi);
             im -= v * Math.sin(phi);
@@ -261,11 +260,11 @@ function drawLoop() {
     }
 
     // 5. RENDER
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'; // Чуть более плотный хвост
     ctx.fillRect(0, 0, w, h);
     
     ctx.strokeStyle = '#003300';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
     ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
@@ -286,18 +285,31 @@ function drawLoop() {
         const y = cy + Math.sin(a) * r;
         
         let hue = 240 - (f * 2.5);
-        let size = 4 + m * 0.6;
+        
+        // ЖЕСТКИЙ ЛИМИТ РАЗМЕРА: базовая точка 2px, максимум 15px.
+        let ptRadius = 2 + Math.min(13, m * 0.1);
         let bright = 50;
         
-        if(gamma > 200 && f > 30) { hue=0; bright=70; }
-        else if(erd > 2.0 && f>=8 && f<=13) { hue=170; bright=80; size*=1.5; }
+        if(gamma > 200 && f > 30) { 
+            hue = 0; 
+            bright = 60; 
+            // Для мышц размер чуть больше, но тоже лимитирован
+            ptRadius = 3 + Math.min(12, m * 0.05); 
+        }
+        else if(erd > 2.0 && f>=8 && f<=13) { 
+            hue = 170; 
+            bright = 80; 
+            ptRadius *= 1.5; 
+        }
         
         if(m > 0.5) {
-            const opacity = 0.5 + Math.min(0.5, m/10);
+            const opacity = 0.4 + Math.min(0.5, m/15);
             ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${opacity})`;
             
-            // Используем fillRect вместо arc для максимальной плавности на мобилке
-            ctx.fillRect(x - size/2, y - size/2, size, size);
+            // Возвращаем красивые круги!
+            ctx.beginPath();
+            ctx.arc(x, y, ptRadius, 0, Math.PI*2);
+            ctx.fill();
         }
     }
 
