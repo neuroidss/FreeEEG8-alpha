@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Neuro-Choreographer V18 PS Style</title>
+    <title>Neuro-Choreographer V18 PS Style (fixed)</title>
     <style>
         :root { --neon: #00ff41; --bg: #050505; }
-        * { box-sizing: border-box; touch-action: none; } /* Запрещаем прокрутку и зум */
+        * { box-sizing: border-box; touch-action: none; } /* запрещаем скролл */
         body {
             background: var(--bg);
             color: var(--neon);
@@ -287,7 +287,7 @@ class PsyEngine extends AudioWorkletProcessor {
 registerProcessor('psy-engine', PsyEngine);
 `;
 
-/** --- UI с поддержкой мультитач --- **/
+/** --- UI с поддержкой мультитач (исправлено) --- **/
 let audioCtx, psyNode;
 let lastStrum = performance.now();
 let intervals = [500, 500];
@@ -306,35 +306,29 @@ async function init() {
 }
 document.getElementById('overlay').onclick = init;
 
-/**
- * Настройка джойстика с мультитач поддержкой.
- * Запоминаем identifier касания, которое попало в зону.
- */
-function setupJoy(zoneId, handleId, isLeft) {
+// --- Стики (с мультитач) ---
+function setupJoystick(zoneId, handleId, isLeft) {
     const zone = document.getElementById(zoneId);
     const handle = document.getElementById(handleId);
-    let activeTouchId = null; // идентификатор активного касания
+    let activeTouchId = null; // идентификатор касания, управляющего стиком
 
     function handleStart(e) {
         e.preventDefault();
         const touch = e.touches[0];
-        // Проверяем, что касание произошло внутри зоны
         const rect = zone.getBoundingClientRect();
-        const x = touch.clientX, y = touch.clientY;
-        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        if (touch.clientX >= rect.left && touch.clientX <= rect.right &&
+            touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
             activeTouchId = touch.identifier;
-            moveHandler(touch); // сразу обновить позицию
+            updatePosition(touch);
         }
     }
 
     function handleMove(e) {
         if (activeTouchId === null) return;
         e.preventDefault();
-        // Ищем касание с сохранённым идентификатором
         for (let i = 0; i < e.touches.length; i++) {
-            const touch = e.touches[i];
-            if (touch.identifier === activeTouchId) {
-                moveHandler(touch);
+            if (e.touches[i].identifier === activeTouchId) {
+                updatePosition(e.touches[i]);
                 break;
             }
         }
@@ -343,7 +337,7 @@ function setupJoy(zoneId, handleId, isLeft) {
     function handleEnd(e) {
         if (activeTouchId === null) return;
         e.preventDefault();
-        // Проверяем, осталось ли активное касание в списке
+        // Проверяем, осталось ли активное касание
         let stillActive = false;
         for (let i = 0; i < e.touches.length; i++) {
             if (e.touches[i].identifier === activeTouchId) {
@@ -357,7 +351,7 @@ function setupJoy(zoneId, handleId, isLeft) {
         }
     }
 
-    function moveHandler(touch) {
+    function updatePosition(touch) {
         const rect = zone.getBoundingClientRect();
         const x = (touch.clientX - rect.left - rect.width/2) / (rect.width/2);
         const y = (touch.clientY - rect.top - rect.height/2) / (rect.height/2);
@@ -366,18 +360,15 @@ function setupJoy(zoneId, handleId, isLeft) {
         handle.style.transform = `translate(${nx*60}px, ${ny*60}px)`;
 
         if (isLeft) {
-            // Левый стик: rootPos
             const angle = (Math.atan2(nx, -ny) + Math.PI) / (2 * Math.PI);
             psyNode?.port.postMessage({ rootPos: angle });
         } else {
-            // Правый стик: warp + strum
             psyNode?.port.postMessage({ warp: 0.9 + ((nx + 1)/2)*0.2 });
-            const ry = -ny; // инвертируем Y, чтобы вверх было положительно
-            processStrum(ry);
+            processStrum(-ny); // вызываем обработку страма
         }
     }
 
-    // Функция страма (вынесена для доступа к общим переменным)
+    // Обработка страма (вынесена для доступа к общим переменным)
     const fired = new Array(6).fill(false);
     function processStrum(ry) {
         if (Math.abs(ry) < 0.1) fired.fill(false);
@@ -415,10 +406,9 @@ function setupJoy(zoneId, handleId, isLeft) {
     zone.addEventListener('touchend', handleEnd, { passive: false });
     zone.addEventListener('touchcancel', handleEnd, { passive: false });
 
-    // Для мыши (отладка на десктопе)
+    // Для мыши (отладка)
     zone.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        // эмулируем одно касание
         activeTouchId = 'mouse';
         const rect = zone.getBoundingClientRect();
         const x = (e.clientX - rect.left - rect.width/2) / (rect.width/2);
@@ -459,106 +449,112 @@ function setupJoy(zoneId, handleId, isLeft) {
     });
 }
 
-// Инициализация джойстиков
-setupJoy('l-zone', 'l-handle', true);
-setupJoy('r-zone', 'r-handle', false);
+// Инициализация стиков
+setupJoystick('l-zone', 'l-handle', true);
+setupJoystick('r-zone', 'r-handle', false);
 
+// --- Кнопки (простая и надёжная реализация) ---
 /**
- * Улучшенная привязка кнопок с поддержкой мультитач.
- * Для нетогловых кнопок: активна пока касание удерживается.
- * Для тогловых (isToggle=true): переключается по первому касанию.
+ * Привязка кнопки с поддержкой мультитач.
+ * @param {string} id - ID элемента
+ * @param {string} param - имя параметра для AudioWorklet
+ * @param {any} valOn - значение при нажатии (для тогловых - значение "вкл")
+ * @param {any} valOff - значение при отпускании (для тогловых - значение "выкл")
+ * @param {boolean} isToggle - true для кнопок-переключателей (DRUMS, LOCK)
  */
 function bindButton(id, param, valOn, valOff, isToggle = false) {
-    const el = document.getElementById(id);
-    // Для тогловых храним состояние
-    let toggleState = false;
-    // Множество активных идентификаторов касаний для этой кнопки
-    const activeTouches = new Set();
+    const btn = document.getElementById(id);
+    let touchIds = new Set(); // множество активных идентификаторов касаний
+    let toggleState = false;   // для тогловых кнопок
 
     function activate() {
         if (isToggle) {
+            // Переключаем состояние при первом касании
             toggleState = !toggleState;
-            el.classList.toggle('active', toggleState);
+            btn.classList.toggle('active', toggleState);
             const msg = {};
             msg[param] = toggleState ? valOn : valOff;
             psyNode?.port.postMessage(msg);
         } else {
-            // Если уже активно другим касанием, не меняем
-            if (activeTouches.size === 0) {
-                el.classList.add('active');
-                const msg = {};
-                msg[param] = valOn;
-                psyNode?.port.postMessage(msg);
-            }
+            // Обычная кнопка: добавляем класс и отправляем ON
+            btn.classList.add('active');
+            const msg = {};
+            msg[param] = valOn;
+            psyNode?.port.postMessage(msg);
         }
     }
 
     function deactivate() {
         if (!isToggle) {
-            // Деактивируем только если не осталось активных касаний
-            if (activeTouches.size === 0) {
-                el.classList.remove('active');
+            // Если не осталось касаний, убираем класс и отправляем OFF
+            if (touchIds.size === 0) {
+                btn.classList.remove('active');
                 const msg = {};
                 msg[param] = valOff;
                 psyNode?.port.postMessage(msg);
             }
         }
+        // Для тогловых ничего не делаем при отпускании
     }
 
-    el.addEventListener('touchstart', (e) => {
+    btn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.touches.length; i++) {
             const touch = e.touches[i];
-            if (!activeTouches.has(touch.identifier)) {
-                activeTouches.add(touch.identifier);
-                activate();
+            if (!touchIds.has(touch.identifier)) {
+                // Если это первое касание для этой кнопки
+                if (touchIds.size === 0) {
+                    activate();
+                }
+                touchIds.add(touch.identifier);
             }
         }
     });
 
-    el.addEventListener('touchend', (e) => {
+    btn.addEventListener('touchend', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            activeTouches.delete(touch.identifier);
+            touchIds.delete(touch.identifier);
         }
         deactivate();
     });
 
-    el.addEventListener('touchcancel', (e) => {
+    btn.addEventListener('touchcancel', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            activeTouches.delete(touch.identifier);
+            touchIds.delete(touch.identifier);
         }
         deactivate();
     });
 
-    // Для мыши (отладка)
-    el.addEventListener('mousedown', (e) => {
+    // Для мыши (десктоп)
+    btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        if (!isToggle) {
-            el.classList.add('active');
-            const msg = {};
-            msg[param] = valOn;
-            psyNode?.port.postMessage(msg);
-        } else {
+        if (isToggle) {
             toggleState = !toggleState;
-            el.classList.toggle('active', toggleState);
+            btn.classList.toggle('active', toggleState);
             const msg = {};
             msg[param] = toggleState ? valOn : valOff;
             psyNode?.port.postMessage(msg);
+        } else {
+            btn.classList.add('active');
+            const msg = {};
+            msg[param] = valOn;
+            psyNode?.port.postMessage(msg);
         }
     });
+
     if (!isToggle) {
-        el.addEventListener('mouseup', () => {
-            el.classList.remove('active');
+        btn.addEventListener('mouseup', () => {
+            btn.classList.remove('active');
             const msg = {};
             msg[param] = valOff;
             psyNode?.port.postMessage(msg);
         });
-        el.addEventListener('mouseleave', () => {
-            el.classList.remove('active');
+        btn.addEventListener('mouseleave', () => {
+            btn.classList.remove('active');
             const msg = {};
             msg[param] = valOff;
             psyNode?.port.postMessage(msg);
@@ -568,50 +564,49 @@ function bindButton(id, param, valOn, valOff, isToggle = false) {
 
 // Специальная обработка для LOCK (обновляет debug)
 function bindLock(id) {
-    const el = document.getElementById(id);
-    let lockState = false;
-    const activeTouches = new Set();
+    const btn = document.getElementById(id);
+    let touchIds = new Set();
 
-    el.addEventListener('touchstart', (e) => {
+    btn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.touches.length; i++) {
             const touch = e.touches[i];
-            if (!activeTouches.has(touch.identifier)) {
-                activeTouches.add(touch.identifier);
-                // Переключаем состояние
-                lockState = !lockState;
-                rhythmLocked = lockState;
-                el.classList.toggle('active', lockState);
-                document.getElementById('debug').innerHTML = 
-                    `RHYTHM: ${lockState ? 'LOCKED 🔒' : 'ADAPTIVE 🔄'} | ENGINE: WEB-AUDIO GPU-STYLE`;
+            if (!touchIds.has(touch.identifier)) {
+                if (touchIds.size === 0) {
+                    // Переключаем состояние
+                    rhythmLocked = !rhythmLocked;
+                    btn.classList.toggle('active', rhythmLocked);
+                    document.getElementById('debug').innerHTML = 
+                        `RHYTHM: ${rhythmLocked ? 'LOCKED 🔒' : 'ADAPTIVE 🔄'} | ENGINE: WEB-AUDIO GPU-STYLE`;
+                }
+                touchIds.add(touch.identifier);
             }
         }
     });
 
-    el.addEventListener('touchend', (e) => {
+    btn.addEventListener('touchend', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            activeTouches.delete(touch.identifier);
+            touchIds.delete(touch.identifier);
         }
     });
 
-    el.addEventListener('touchcancel', (e) => {
+    btn.addEventListener('touchcancel', (e) => {
         e.preventDefault();
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            activeTouches.delete(touch.identifier);
+            touchIds.delete(touch.identifier);
         }
     });
 
     // Мышь
-    el.addEventListener('mousedown', (e) => {
+    btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        lockState = !lockState;
-        rhythmLocked = lockState;
-        el.classList.toggle('active', lockState);
+        rhythmLocked = !rhythmLocked;
+        btn.classList.toggle('active', rhythmLocked);
         document.getElementById('debug').innerHTML = 
-            `RHYTHM: ${lockState ? 'LOCKED 🔒' : 'ADAPTIVE 🔄'} | ENGINE: WEB-AUDIO GPU-STYLE`;
+            `RHYTHM: ${rhythmLocked ? 'LOCKED 🔒' : 'ADAPTIVE 🔄'} | ENGINE: WEB-AUDIO GPU-STYLE`;
     });
 }
 
@@ -622,7 +617,7 @@ bindButton('RB', 'heat', 4.0, 1.2);
 bindButton('RT', 'feedback', 0.8, 0.0);
 bindButton('BTN_SQ', 'glitch', 1, 0);
 bindButton('BTN_TR', 'zapActive', 1, 0);
-bindButton('BTN_CI', 'heat', 15.0, 1.2);   // используем heat для эффекта "acid"
+bindButton('BTN_CI', 'heat', 15.0, 1.2);   // acid effect
 bindButton('BTN_CR', 'subActive', 1, 0);
 bindButton('BTN_DR', 'drumsActive', 1, 0, true); // toggle
 bindButton('BTN_NL', 'noiseL', 1, 0);
