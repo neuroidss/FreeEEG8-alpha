@@ -2,33 +2,161 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neuro-Choreographer V18 PRO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Neuro-Choreographer V18 PRO + LOCK</title>
     <style>
         :root { --neon: #00ff41; --bg: #050505; }
-        body { background: var(--bg); color: var(--neon); font-family: 'Courier New', monospace; margin: 0; overflow: hidden; user-select: none; touch-action: none; }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--neon);
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            touch-action: none;
+            height: 100dvh; /* динамическая высота с учётом интерфейса браузера */
+            display: flex;
+            flex-direction: column;
+        }
         
-        #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; cursor: pointer; }
-        #overlay h1 { border: 3px solid var(--neon); padding: 30px; box-shadow: 0 0 20px var(--neon); text-align: center; }
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            cursor: pointer;
+        }
+        #overlay h1 {
+            border: 3px solid var(--neon);
+            padding: 30px;
+            box-shadow: 0 0 20px var(--neon);
+            text-align: center;
+            font-size: clamp(1rem, 5vw, 2rem);
+        }
 
-        #container { display: flex; flex-direction: column; height: 100vh; }
-        #top-ui { display: grid; grid-template-columns: 1fr 1fr; flex-grow: 1; }
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            flex: 1;
+            min-height: 0; /* важно для правильного сжатия */
+        }
         
-        .side { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid #111; }
-        .joy-zone { width: 200px; height: 200px; background: #0a0a0a; border-radius: 50%; border: 2px solid #222; position: relative; }
-        .handle { width: 60px; height: 60px; background: var(--neon); border-radius: 50%; position: absolute; top: 50%; left: 50%; margin: -30px; box-shadow: 0 0 20px var(--neon); pointer-events: none; }
+        #top-ui {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+        
+        .side {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #111;
+        }
+        .joy-zone {
+            width: min(200px, 40vw);
+            height: min(200px, 40vw);
+            background: #0a0a0a;
+            border-radius: 50%;
+            border: 2px solid #222;
+            position: relative;
+        }
+        .handle {
+            width: min(60px, 15vw);
+            height: min(60px, 15vw);
+            background: var(--neon);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            margin: calc(min(60px, 15vw) / -2);
+            box-shadow: 0 0 20px var(--neon);
+            pointer-events: none;
+        }
 
-        #fx-panel { display: flex; height: 100px; background: #000; border-top: 1px solid #222; justify-content: space-around; align-items: center; padding: 0 10px; }
-        .fx-btn { width: 50px; height: 50px; border: 2px solid var(--neon); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; transition: 0.1s; cursor: pointer; }
-        .fx-btn.active { background: var(--neon); color: #000; box-shadow: 0 0 15px var(--neon); }
+        /* Панель кнопок – адаптивная и прокручиваемая */
+        #fx-panel {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background: #000;
+            border-top: 1px solid #222;
+            flex: 0 0 auto;
+            max-height: 30vh; /* ограничение, чтобы не занимать слишком много */
+            overflow-y: auto;  /* прокрутка, если кнопки не влезают */
+            scrollbar-width: thin;
+            scrollbar-color: var(--neon) #111;
+        }
+        #fx-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+        #fx-panel::-webkit-scrollbar-track {
+            background: #111;
+        }
+        #fx-panel::-webkit-scrollbar-thumb {
+            background: var(--neon);
+            border-radius: 3px;
+        }
+
+        .fx-btn {
+            width: 55px;
+            height: 55px;
+            border: 2px solid var(--neon);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 12px;
+            transition: 0.1s;
+            cursor: pointer;
+            background: #0a0a0a;
+            flex-shrink: 0;
+        }
+        .fx-btn.active {
+            background: var(--neon);
+            color: #000;
+            box-shadow: 0 0 15px var(--neon);
+        }
         
-        #debug { position: absolute; top: 10px; width: 100%; text-align: center; font-size: 10px; opacity: 0.5; pointer-events: none; }
+        /* Для очень маленьких экранов уменьшаем кнопки */
+        @media (max-width: 400px) {
+            .fx-btn {
+                width: 45px;
+                height: 45px;
+                font-size: 10px;
+            }
+        }
+        
+        #debug {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            font-size: 10px;
+            opacity: 0.8;
+            pointer-events: none;
+            color: var(--neon);
+            text-shadow: 0 0 5px var(--neon);
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
 
-<div id="overlay"><h1>NEURAL LINK: INITIALIZE</h1></div>
-<div id="debug">TEMPO: ADAPTIVE | ENGINE: WEB-AUDIO GPU-STYLE</div>
+<div id="overlay"><h1>⚡ NEURAL LINK: INITIALIZE ⚡</h1></div>
+<div id="debug">RHYTHM: ADAPTIVE 🔄 | ENGINE: WEB-AUDIO GPU-STYLE</div>
 
 <div id="container">
     <div id="top-ui">
@@ -48,7 +176,9 @@
         </div>
     </div>
 
+    <!-- FX Panel with LOCK button and all others -->
     <div id="fx-panel">
+        <div class="fx-btn" id="BTN_LK">🔒 LOCK</div>
         <div class="fx-btn" id="BTN_SQ">SQ</div>
         <div class="fx-btn" id="BTN_TR">TR</div>
         <div class="fx-btn" id="BTN_CI">CI</div>
@@ -60,7 +190,7 @@
 </div>
 
 <script>
-/** --- AUDIO WORKLET: DSP ENGINE --- **/
+/** --- AUDIO WORKLET: DSP ENGINE (unchanged) --- **/
 const workletCode = `
 class PsyEngine extends AudioWorkletProcessor {
     constructor() {
@@ -157,10 +287,11 @@ class PsyEngine extends AudioWorkletProcessor {
 registerProcessor('psy-engine', PsyEngine);
 `;
 
-/** --- UI & CONTROL LOGIC --- **/
+/** --- UI & CONTROL LOGIC (with Rhythm Lock and mobile improvements) --- **/
 let audioCtx, psyNode;
 let lastStrum = performance.now();
 let intervals = [500, 500];
+let rhythmLocked = false;
 
 async function init() {
     if (audioCtx) return;
@@ -178,7 +309,7 @@ document.getElementById('overlay').onclick = init;
 function setupJoy(id, handleId, isLeft) {
     const zone = document.getElementById(id), handle = document.getElementById(handleId);
     let active = false;
-    let fired = new Array(6).fill(false);
+    let fired = new Array(6).fill(false);   // FIXED
 
     const move = (e) => {
         if (!active) return;
@@ -193,29 +324,42 @@ function setupJoy(id, handleId, isLeft) {
             const angle = (Math.atan2(nx, -ny) + Math.PI) / (2 * Math.PI);
             psyNode?.port.postMessage({ rootPos: angle });
         } else {
-            // Right Joy: Strum + Warp
             psyNode?.port.postMessage({ warp: 0.9 + ((nx + 1)/2)*0.2 });
             const ry = -ny;
             if (Math.abs(ry) < 0.1) fired.fill(false);
             const th = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
-            const triggered = (v, i) => {
-                psyNode?.port.postMessage({ pluck: i });
-                fired[i] = true;
-                let now = performance.now();
-                if(now - lastStrum > 80 && now - lastStrum < 2000) {
-                    intervals.push(now - lastStrum); if(intervals.length > 4) intervals.shift();
-                    let avg = intervals.reduce((a,b)=>a+b)/intervals.length;
-                    psyNode?.port.postMessage({ delaySamples: Math.floor((avg/1000)*44100) });
+            
+            const trigger = (idx) => {
+                psyNode?.port.postMessage({ pluck: idx });
+                fired[idx] = true;
+                
+                if (!rhythmLocked) {
+                    let now = performance.now();
+                    if (now - lastStrum > 80 && now - lastStrum < 2000) {
+                        intervals.push(now - lastStrum);
+                        if (intervals.length > 4) intervals.shift();
+                        let avg = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+                        psyNode?.port.postMessage({ delaySamples: Math.floor((avg/1000)*44100) });
+                    }
+                    lastStrum = now;
                 }
-                lastStrum = now;
             };
-            if (ry > 0.1) th.forEach((t, i) => { if(ry > t && !fired[i]) triggered(ry, i); });
-            else if (ry < -0.1) th.forEach((t, i) => { if(Math.abs(ry) > t && !fired[5-i]) triggered(ry, 5-i); });
+            
+            if (ry > 0.1) {
+                th.forEach((t, i) => {
+                    if (ry > t && !fired[i]) trigger(i);
+                });
+            } else if (ry < -0.1) {
+                th.forEach((t, i) => {
+                    if (Math.abs(ry) > t && !fired[5-i]) trigger(5-i);
+                });
+            }
         }
     };
 
-    zone.onmousedown = zone.ontouchstart = (e) => { active = true; move(e); };
-    window.addEventListener('mousemove', move); window.addEventListener('touchmove', move);
+    zone.onmousedown = zone.ontouchstart = (e) => { e.preventDefault(); active = true; move(e); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('touchmove', move, { passive: false });
     window.addEventListener('mouseup', () => { active = false; handle.style.transform = ''; });
     window.addEventListener('touchend', () => { active = false; handle.style.transform = ''; });
 }
@@ -223,6 +367,7 @@ function setupJoy(id, handleId, isLeft) {
 setupJoy('l-zone', 'l-handle', true);
 setupJoy('r-zone', 'r-handle', false);
 
+// Standard button binding
 function bind(id, param, valOn, valOff, isToggle = false) {
     const el = document.getElementById(id);
     let state = false;
@@ -233,20 +378,36 @@ function bind(id, param, valOn, valOff, isToggle = false) {
         psyNode?.port.postMessage(d);
     };
     el.ontouchstart = el.onmousedown = (e) => { e.preventDefault(); set(true); };
-    if(!isToggle) { el.ontouchend = el.onmouseup = el.onmouseleave = () => set(false); }
+    if(!isToggle) { 
+        el.ontouchend = el.onmouseup = el.onmouseleave = () => set(false); 
+    }
 }
 
+// Lock button (toggles rhythmLocked and updates debug text)
+function bindLock(id) {
+    const el = document.getElementById(id);
+    el.ontouchstart = el.onmousedown = (e) => {
+        e.preventDefault();
+        rhythmLocked = !rhythmLocked;
+        el.classList.toggle('active', rhythmLocked);
+        document.getElementById('debug').innerHTML = 
+            `RHYTHM: ${rhythmLocked ? 'LOCKED 🔒' : 'ADAPTIVE 🔄'} | ENGINE: WEB-AUDIO GPU-STYLE`;
+    };
+}
+
+// Map all buttons
 bind('LB', 'minor', 0.89, 1.0);
 bind('LT', 'sept', 0.8, 0.0);
 bind('RB', 'heat', 4.0, 1.2);
-bind('RT', 'feedback', 0.8, 0.0); // RT также влияет на сустейн в ворклете
+bind('RT', 'feedback', 0.8, 0.0);
 bind('BTN_SQ', 'glitch', 1, 0);
 bind('BTN_TR', 'zapActive', 1, 0);
-bind('BTN_CI', 'acid', 15.0, 1.2);
+bind('BTN_CI', 'heat', 15.0, 1.2);     // "acid" effect uses heat
 bind('BTN_CR', 'subActive', 1, 0);
 bind('BTN_DR', 'drumsActive', 1, 0, true);
 bind('BTN_NL', 'noiseL', 1, 0);
 bind('BTN_NR', 'noiseR', 1, 0);
+bindLock('BTN_LK');
 
 </script>
 </body>
