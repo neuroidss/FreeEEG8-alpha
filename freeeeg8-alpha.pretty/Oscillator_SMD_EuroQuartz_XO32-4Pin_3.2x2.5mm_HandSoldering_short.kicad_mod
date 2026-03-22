@@ -1,0 +1,413 @@
+(footprint "Oscillator_SMD_EuroQuartz_XO32-4Pin_3.2x2.5mm_HandSoldering_short"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(descr "Miniature Crystal Clock Oscillator EuroQuartz XO32 series, http://cdn-reichelt.de/documents/datenblatt/B400/XO32.pdf, hand-soldering, 3.2x2.5mm^2 package")
+	(tags "SMD SMT crystal oscillator hand-soldering")
+	(property "Reference" "X1"
+		(at 2.413 0 0)
+		(layer "F.SilkS")
+		(uuid "1451dcdd-c6e9-4ed1-8476-9e68ee918294")
+		(effects
+			(font
+				(size 0.5 0.5)
+				(thickness 0.125)
+			)
+		)
+	)
+	(property "Value" "XTAL"
+		(at 0 2.45 0)
+		(layer "F.Fab")
+		(uuid "45796bbf-9584-43c9-a90b-7054ed269989")
+		(effects
+			(font
+				(size 0.5 0.5)
+				(thickness 0.125)
+			)
+		)
+	)
+	(property "Datasheet" "~"
+		(at 0 0 0)
+		(layer "B.Fab")
+		(hide yes)
+		(uuid "89f26bd8-65ae-4105-bbdd-dfdec4dfea46")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.2)
+			)
+			(justify mirror)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "B.Fab")
+		(hide yes)
+		(uuid "87a3c445-376a-443e-9401-2103ab887503")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.2)
+			)
+			(justify mirror)
+		)
+	)
+	(property "MPN" "ECS-2520MVLC-081.92-CN-TR"
+		(at 3.683 -3.683 270)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "f9302872-5837-449d-bd05-a1ec7f638507")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.2)
+			)
+		)
+	)
+	(attr smd)
+	(fp_line
+		(start -2.525 0.125)
+		(end -1.8 0.125)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "7c87f604-f9a2-467a-8d8a-c70df9b10302")
+	)
+	(fp_line
+		(start -2.525 1.425)
+		(end -1.8 1.425)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "ded42db9-fcde-4932-a146-be81b373f98c")
+	)
+	(fp_line
+		(start -1.8 -1.45)
+		(end 1.8 -1.45)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "7945fb2b-0bb8-47fc-b0d3-cafd32ea105c")
+	)
+	(fp_line
+		(start -1.8 -1.425)
+		(end -1.8 -1.45)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "13e95bb6-ab51-49ec-848b-6e769caeedfe")
+	)
+	(fp_line
+		(start -1.8 0.125)
+		(end -1.8 -0.125)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "505eaf81-f961-4b98-b0d7-0cb2a91b0ee5")
+	)
+	(fp_line
+		(start -1.8 1.425)
+		(end -1.8 1.45)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "9f2b287f-ff68-46a9-9bd8-6ced185ef3a8")
+	)
+	(fp_line
+		(start -1.8 1.45)
+		(end 1.8 1.45)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "7b526f42-e803-4ea8-ad4a-3af6ad6ff853")
+	)
+	(fp_line
+		(start 1.8 -1.45)
+		(end 1.8 -1.425)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "ac9591c4-bc9a-4c29-8e29-dab1f485324f")
+	)
+	(fp_line
+		(start 1.8 -0.125)
+		(end 1.8 0.125)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "5024a8ab-59a7-4d6d-9467-dd4eca1851b4")
+	)
+	(fp_line
+		(start 1.8 1.45)
+		(end 1.8 1.425)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "33004e36-ae12-4a39-82e9-fe67c30f7e55")
+	)
+	(fp_circle
+		(center 0 0)
+		(end 0.058333 0)
+		(stroke
+			(width 0.116667)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Adhes")
+		(uuid "6beabcf4-c0d7-4034-8383-15f137074c3a")
+	)
+	(fp_circle
+		(center 0 0)
+		(end 0.133333 0)
+		(stroke
+			(width 0.083333)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Adhes")
+		(uuid "8c4e2c5d-f08d-4f9a-9d5d-c78151bba319")
+	)
+	(fp_circle
+		(center 0 0)
+		(end 0.208333 0)
+		(stroke
+			(width 0.083333)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Adhes")
+		(uuid "f918e9af-c08a-4ad8-a0b5-f379ec3c01c9")
+	)
+	(fp_circle
+		(center 0 0)
+		(end 0.25 0)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Adhes")
+		(uuid "f956ec94-1194-4f41-99b2-ac82470652ae")
+	)
+	(fp_line
+		(start -2.6 -1.5)
+		(end -2.6 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "F.CrtYd")
+		(uuid "57879f65-bea1-4872-a318-589604197724")
+	)
+	(fp_line
+		(start -2.6 1.5)
+		(end 2.6 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "F.CrtYd")
+		(uuid "f0c9ace6-1353-450c-bb52-77d4a0b9d4d2")
+	)
+	(fp_line
+		(start 2.6 -1.5)
+		(end -2.6 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "F.CrtYd")
+		(uuid "b8e42cb5-21ed-402d-bc04-21257a765db3")
+	)
+	(fp_line
+		(start 2.6 1.5)
+		(end 2.6 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "F.CrtYd")
+		(uuid "303ad0e6-e1ec-40bb-9de3-8cc3bc0506a9")
+	)
+	(fp_line
+		(start -1.6 -1.15)
+		(end -1.5 -1.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "1cd9b346-3fdb-41f3-a38c-b657942d9588")
+	)
+	(fp_line
+		(start -1.6 0.25)
+		(end -0.6 1.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "c6995e67-4856-4462-a89d-ff8687a516e3")
+	)
+	(fp_line
+		(start -1.6 1.15)
+		(end -1.6 -1.15)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "8b6fe2be-fee1-40f7-bad2-266cee0ea2d4")
+	)
+	(fp_line
+		(start -1.5 -1.25)
+		(end 1.5 -1.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "0a1697b8-54d9-48d3-a443-6270bd458c93")
+	)
+	(fp_line
+		(start -1.5 1.25)
+		(end -1.6 1.15)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "c2d20e1f-2afe-4e44-9610-814d6c0ebc8e")
+	)
+	(fp_line
+		(start 1.5 -1.25)
+		(end 1.6 -1.15)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "50cd3052-56ad-479a-8cfb-6b1a5cebf37d")
+	)
+	(fp_line
+		(start 1.5 1.25)
+		(end -1.5 1.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "bf0b2c10-8263-405a-86fa-b94bcf4c4b66")
+	)
+	(fp_line
+		(start 1.6 -1.15)
+		(end 1.6 1.15)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "e73dfaba-45f4-452c-b687-923b8a0e376c")
+	)
+	(fp_line
+		(start 1.6 1.15)
+		(end 1.5 1.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(uuid "9b7009bd-a47f-4b9a-8779-8d8fbcee7c73")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0 0)
+		(layer "F.Fab")
+		(uuid "43329e08-e377-4335-be2c-89c470d4e698")
+		(effects
+			(font
+				(size 0.7 0.7)
+				(thickness 0.105)
+			)
+		)
+	)
+	(pad "1" smd rect
+		(at -1.48 0.7776)
+		(size 1.69 0.8948)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "56206704-9ae2-4729-a35b-5e32117b7b5f")
+	)
+	(pad "2" smd rect
+		(at 1.48 0.7776)
+		(size 1.69 0.8948)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "389b16ab-0b54-41d7-ab93-95007c41ee71")
+	)
+	(pad "3" smd rect
+		(at 1.48 -0.7776)
+		(size 1.69 0.8948)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "e9bc272f-b414-467f-b0e3-d8ed13de40db")
+	)
+	(pad "4" smd rect
+		(at -1.48 -0.7776)
+		(size 1.69 0.8948)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "e4ec1513-e66b-43cb-8554-0e13cc68dc5a")
+	)
+	(embedded_fonts no)
+	(model "${KICAD6_3DMODEL_DIR}/Oscillator.3dshapes/Oscillator_SMD_EuroQuartz_XO32-4Pin_3.2x2.5mm_HandSoldering.wrl"
+		(hide yes)
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(model ":KICAD7_3DMODEL_DIR:Oscillator.3dshapes/Oscillator_SMD_EuroQuartz_XO53-4Pin_5.0x3.2mm.wrl"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 0.7 0.7 0.7)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(model "${KICAD9_3DMODEL_DIR}/Oscillator.3dshapes/Oscillator_SMD_EuroQuartz_XO53-4Pin_5.0x3.2mm.wrl"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 0.7 0.7 0.7)
+		)
+		(rotate
+			(xyz -0 -0 -0)
+		)
+	)
+)
