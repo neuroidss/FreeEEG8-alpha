@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Test Bench</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #111; color: #fff; margin: 0; padding: 10px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+        h2 { margin: 0 0 10px 0; font-size: 18px; text-align: center; color: #0f0; }
+        button { background: #333; color: #0f0; border: 1px solid #0f0; padding: 12px; border-radius: 8px; font-weight: bold; width: 100%; margin-bottom: 8px; font-size: 16px; cursor: pointer; }
+        button:active { background: #0f0; color: #000; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .btn-connect { background: #00f; border-color: #00f; color: white; }
+        canvas { background: #000; width: 100%; border: 1px solid #444; border-radius: 8px; margin-top: 5px; }
+        #console { background: #000; color: #0f0; font-family: monospace; font-size: 10px; height: 80px; overflow-y: auto; padding: 5px; border-radius: 8px; border: 1px solid #444; margin-top: auto; }
+        .info-row { display: flex; justify-content: space-between; font-size: 12px; color: #aaa; margin-top: 5px;}
+    </style>
+</head>
+<body>
+
+    <h2>NEURO ADC TEST BENCH</h2>
+    
+    <button id="btnConnect" class="btn-connect">1. CONNECT BLE</button>
+
+    <div class="grid">
+        <button id="btnShort" onclick="runTestShort()">NOISE (Shorted)</button>
+        <button id="btnDC" onclick="runTestDC()">DC TEST SIGNAL</button>
+        <button id="btnEEG" onclick="runTestEEG()">EEG (250 SPS)</button>
+        <button id="btnEMG" onclick="runTestEMG()">EMG (500 SPS)</button>
+    </div>
+
+    <div class="info-row">
+        <span id="lblMode">MODE: STANDBY</span>
+        <span id="lblPGA">PGA: ?</span>
+        <span id="lblSPS">SPS: ?</span>
+    </div>
+
+    <canvas id="scopeCanvas" height="200"></canvas>
+    <canvas id="fftCanvas" height="100"></canvas>
+
+    <div id="console">System Ready...<br></div>
+
+<script>
+// --- КОНФИГ ---
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+
+let dataChar, cmdChar;
+let isConnected = false;
+let currentPGA = 1;
+
+// --- БУФЕРЫ ГРАФИКОВ ---
+const SCOPE_LEN = 200;
+let scopeData = Array.from({length: 8}, () => new Float32Array(SCOPE_LEN).fill(0));
+let fftData = new Float32Array(256).fill(0);
+let fftPointer = 0;
+
+function log(msg) {
+    const c = document.getElementById('console');
+    c.innerHTML += msg + "<br>";
+    c.scrollTop = c.scrollHeight;
+}
+
+// === ПРОЗРАЧНЫЙ МОСТ (BLE <-> SPI) ===
+let pendingReadResolve = null;
+
+async function readReg(addr) {
+    if (!cmdChar) return null;
+    return new Promise(async (resolve) => {
+        pendingReadResolve = resolve;
+        await cmdChar.writeValue(new Uint8Array([addr]));
+        setTimeout(() => { if(pendingReadResolve===resolve){ resolve(null); } }, 1000);
+    });
+}
+
+async function writeReg(addr, val, mask=null) {
+    if (!cmdChar) return;
+    let data = mask !== null ? 
+        new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : 
+        new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
+    await cmdChar.writeValue(data);
+    await new Promise(r => setTimeout(r, 30));
+}
+
+// === BLE ПОДКЛЮЧЕНИЕ ===
+document.getElementById('btnConnect').onclick = async () => {
+    try {
+        log("Ищем устройство...");
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:[SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        dataChar = await service.getCharacteristic(DATA_UUID);
+        cmdChar = await service.getCharacteristic(CMD_UUID);
+
+        // Подписка на ответы регистров
+        await cmdChar.startNotifications();
+        cmdChar.addEventListener('characteristicvaluechanged', (e) => {
+            const v = new DataView(e.target.value.buffer);
+            if (v.byteLength === 3 && pendingReadResolve) {
+                pendingReadResolve(v.getUint16(1, false));
+                pendingReadResolve = null;
+            }
+        });
+
+        // Подписка на ЭЭГ данные
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', handleData);
+
+        isConnected = true;
+        document.getElementById('btnConnect').innerText = "CONNECTED";
+        document.getElementById('btnConnect').style.background = "#0f0";
+        document.getElementById('btnConnect').style.color = "#000";
+        log("Подключено! Проверка чипа...");
+        
+        let id = await readReg(0x00);
+        log(`ID чипа: 0x${id.toString(16)}`);
+
+    } catch (e) { log("Ошибка: " + e); }
+};
+
+// === ПАРСИНГ ДАННЫХ ===
+function handleData(e) {
+    const buf = new Uint8Array(e.target.value.buffer);
+    if (buf[0] !== 0xA0 || buf[32] !== 0xC0) return;
+
+    let scale = (1.2 / currentPGA / 8388607.0) * 1e6; // в микроВольты
+
+    let avgChannelValue = 0;
+
+    for (let i = 0; i < 8; i++) {
+        let start = 2 + i * 3;
+        let val = (buf[start]<<16) | (buf[start+1]<<8) | buf[start+2];
+        if (val & 0x800000) val -= 0x1000000;
+        let uV = val * scale;
+        
+        // Сдвиг графика (Scope)
+        for(let j=1; j<SCOPE_LEN; j++) scopeData[i][j-1] = scopeData[i][j];
+        scopeData[i][SCOPE_LEN-1] = uV;
+
+        if (i===0) avgChannelValue = uV; // Для FFT берем 1 канал
+    }
+
+    // Собираем буфер для FFT
+    fftData[fftPointer++] = avgChannelValue;
+    if (fftPointer >= 256) fftPointer = 0;
+}
+
+// === МАКРОСЫ ДЛЯ АЦП ===
+async function setMuxAll(muxCode) {
+    for (let i = 0; i < 8; i++) {
+        let addr = 0x09 + (i * 5); // CH0_CFG = 0x09, CH1 = 0x0E ...
+        await writeReg(addr, muxCode, 0x0003); // MUX mask = 0x03
+    }
+}
+
+async function setPgaAll(pgaCode) {
+    // В ADS131M08 GAIN1=0x04(Ch0-3), GAIN2=0x05(Ch4-7). Каждый занимает по 4 бита.
+    let val = (pgaCode<<12) | (pgaCode<<8) | (pgaCode<<4) | pgaCode;
+    await writeReg(0x04, val);
+    await writeReg(0x05, val);
+    currentPGA =[1,2,4,8,16,32,64,128][pgaCode];
+}
+
+// === ТЕСТЫ ===
+
+// 1. Аппаратный шум (Входы закорочены)
+async function runTestShort() {
+    log(">> ЗАПУСК: ШУМ (Входы закорочены)");
+    document.getElementById('lblMode').innerText = "MODE: NOISE TEST";
+    document.getElementById('lblSPS').innerText = "SPS: 250";
+    document.getElementById('lblPGA').innerText = "PGA: 1";
+    
+    await writeReg(0x03, 0x001C, 0x001C); // OSR_16384 = 250 SPS
+    await setPgaAll(0); // PGA = 1
+    await setMuxAll(1); // MUX = 1 (Shorted)
+    
+    // Анализируем через секунду
+    setTimeout(() => {
+        let rms = 0;
+        for(let i=0; i<SCOPE_LEN; i++) rms += scopeData[0][i]*scopeData[0][i];
+        rms = Math.sqrt(rms / SCOPE_LEN);
+        log(`RMS Шум (Ch1): ${rms.toFixed(2)} мкВ. (Норма < 2 мкВ)`);
+    }, 1000);
+}
+
+// 2. Внутренний тест шкалы (DC = 160mV)
+async function runTestDC() {
+    log(">> ЗАПУСК: DC SIGNAL TEST");
+    document.getElementById('lblMode').innerText = "MODE: DC TEST";
+    
+    await writeReg(0x03, 0x001C, 0x001C); // 250 SPS
+    await setPgaAll(0); // PGA = 1
+    await setMuxAll(2); // MUX = Positive DC
+    
+    setTimeout(() => {
+        let mean = 0;
+        for(let i=0; i<SCOPE_LEN; i++) mean += scopeData[0][i];
+        mean /= SCOPE_LEN;
+        log(`DC Сигнал (Ch1): ${mean.toFixed(0)} мкВ. (Должно быть ~160000)`);
+    }, 1000);
+}
+
+// 3. Режим ЭЭГ (250 SPS, PGA=32)
+async function runTestEEG() {
+    log(">> ЗАПУСК: EEG MODE");
+    document.getElementById('lblMode').innerText = "MODE: EEG";
+    document.getElementById('lblSPS').innerText = "SPS: 250";
+    document.getElementById('lblPGA').innerText = "PGA: 32";
+    
+    await writeReg(0x03, 0x001C, 0x001C); // OSR_16384 = 250 SPS
+    await setPgaAll(5); // PGA_32 = код 5
+    await setMuxAll(0); // Normal input
+}
+
+// 4. Режим ЭМГ (500 SPS, PGA=4)
+async function runTestEMG() {
+    log(">> ЗАПУСК: EMG MODE");
+    document.getElementById('lblMode').innerText = "MODE: EMG";
+    document.getElementById('lblSPS').innerText = "SPS: 500";
+    document.getElementById('lblPGA').innerText = "PGA: 4";
+    
+    // OSR_8192 = 500 SPS (Маска 0x001C, Значение 6 << 2 = 0x0018)
+    await writeReg(0x03, 0x0018, 0x001C); 
+    await setPgaAll(2); // PGA_4 = код 2
+    await setMuxAll(0); // Normal input
+}
+
+// === РЕНДЕР ГРАФИКОВ (Canvas) ===
+const ctxScope = document.getElementById('scopeCanvas').getContext('2d');
+const ctxFft = document.getElementById('fftCanvas').getContext('2d');
+
+const colors =["#ff4444", "#ffaa00", "#ffff00", "#44ff44", "#00ffff", "#0044ff", "#ff00ff", "#ffffff"];
+
+function draw() {
+    requestAnimationFrame(draw);
+    if (!isConnected) return;
+
+    let w = ctxScope.canvas.width;
+    let h = ctxScope.canvas.height;
+
+    // --- SCOPE ---
+    ctxScope.clearRect(0, 0, w, h);
+    ctxScope.lineWidth = 1;
+
+    for (let ch = 0; ch < 8; ch++) {
+        ctxScope.strokeStyle = colors[ch];
+        ctxScope.beginPath();
+        let yOffset = (ch + 1) * (h / 9); // Разносим каналы по вертикали
+        
+        for (let i = 0; i < SCOPE_LEN; i++) {
+            let x = (i / SCOPE_LEN) * w;
+            // Убираем DC-смещение (среднее) "на лету" для красивой отрисовки
+            let dc = scopeData[ch].reduce((a,b)=>a+b,0)/SCOPE_LEN;
+            let val = scopeData[ch][i] - dc;
+            
+            let y = yOffset - (val * 0.1); // Масштаб на экране
+            if (i === 0) ctxScope.moveTo(x, y);
+            else ctxScope.lineTo(x, y);
+        }
+        ctxScope.stroke();
+    }
+
+    // --- FFT (Fast & Dirty O(N^2) для 256 точек в JS хватит) ---
+    // Применяем окно Ханна
+    let signal = new Float32Array(256);
+    let dcFft = fftData.reduce((a,b)=>a+b,0)/256;
+    for(let i=0; i<256; i++) {
+        let multiplier = 0.5 * (1 - Math.cos((2 * Math.PI * i) / 255));
+        signal[i] = (fftData[i] - dcFft) * multiplier;
+    }
+
+    // Считаем амплитудный спектр (только первая половина)
+    let spectrum = new Float32Array(128);
+    for (let k = 0; k < 128; k++) {
+        let re = 0, im = 0;
+        for (let n = 0; n < 256; n++) {
+            let angle = (2 * Math.PI * k * n) / 256;
+            re += signal[n] * Math.cos(angle);
+            im -= signal[n] * Math.sin(angle);
+        }
+        spectrum[k] = Math.sqrt(re*re + im*im);
+    }
+
+    // Рисуем FFT
+    let wFft = ctxFft.canvas.width;
+    let hFft = ctxFft.canvas.height;
+    ctxFft.clearRect(0, 0, wFft, hFft);
+    ctxFft.fillStyle = "#0f0";
+
+    for (let k = 1; k < 60; k++) { // Рисуем бины (примерно до 100 Гц)
+        let x = (k / 60) * wFft;
+        let y = (spectrum[k] * 0.05); // Масштаб амплитуды
+        if (y > hFft) y = hFft;
+        ctxFft.fillRect(x, hFft - y, (wFft/60)-1, y);
+    }
+}
+draw();
+
+</script>
+</body>
+</html>
