@@ -1,5 +1,7 @@
 # FreeEEG8-alpha
 
+[Psytrance_Spiral](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Psytrance_Spiral.html)
+[Motor_Imagery_Web-Synth](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Motor_Imagery_Web-Synth.html)
 [Neuro_Test_Bench](https://neuroidss.github.io/FreeEEG8-alpha/Neuro_Test_Bench/Neuro_Test_Bench.html)
 
 [FreeEEG8-alpha_1_1_gerbers](https://github.com/neuroidss/FreeEEG8-alpha/releases/tag/FreeEEG8-alpha_1_1_gerbers)
