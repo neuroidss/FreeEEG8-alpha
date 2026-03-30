@@ -1,5 +1,7 @@
 # FreeEEG8-alpha
 
+[Hyperspiral_Mandala](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Hyperspiral_Mandala.html)
+
 [Psytrance_Spiral](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Psytrance_Spiral.html)
 
 [Motor_Imagery_Web-Synth](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Motor_Imagery_Web-Synth.html)
