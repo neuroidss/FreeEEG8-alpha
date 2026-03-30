@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Motor Imagery Web-Synth</title>
+    <style>
+        body { 
+            margin: 0; background: #000; overflow: hidden; 
+            font-family: 'Courier New', monospace;
+            touch-action: none; /* Блокируем зум/скролл пальцами */
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.8); z-index: 10;
+            transition: opacity 0.5s;
+        }
+        
+        button {
+            background: rgba(0, 255, 204, 0.1); color: #00ffcc;
+            border: 2px solid #00ffcc; padding: 20px 40px;
+            font-size: 20px; font-weight: bold; border-radius: 50px;
+            margin: 10px; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            backdrop-filter: blur(5px);
+        }
+        button:active { background: #00ffcc; color: #000; }
+        
+        #status {
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            text-align: center; color: #666; font-size: 12px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1 style="color:white; text-shadow: 0 0 10px #fff;">MOTOR IMAGERY SYNTH</h1>
+    <button id="btn-full">1. GO FULLSCREEN</button>
+    <button id="btn-conn">2. CONNECT & START</button>
+</div>
+
+<canvas id="cvs"></canvas>
+<div id="status">WAITING FOR CONNECTION...</div>
+
+<script>
+// === CONFIGURATION ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6; // Gain=32
+
+const ANGLES_RAD = [-1.256, -0.628, 0.628, 1.256, 1.885, 2.513, -2.513, -1.885]; // -72, -36, 36...
+const COS_TABLE = ANGLES_RAD.map(a => Math.cos(a));
+const SIN_TABLE = ANGLES_RAD.map(a => Math.sin(a));
+
+// === STATE ===
+let isRunning = false;
+let packetBuffer = new Uint8Array();
+let neuroParams = {
+    deltaAmp: 0, thetaAmp: 0, alphaAmp: 0, gammaAmp: 0,
+    leadX: 0, leadY: 0
+};
+let audioWorkletNode = null;
+
+// === BLE LOGIC ===
+async function connectBLE() {
+    try {
+        await initAudio(); // Сначала запрашиваем аудио, т.к. нужно действие пользователя
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const char = await service.getCharacteristic(CHAR_UUID);
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', onData);
+        
+        document.getElementById('ui').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui').style.display = 'none', 500);
+        document.getElementById('status').innerText = "STREAMING ACTIVE";
+        
+        isRunning = true;
+        animate();
+    } catch(e) {
+        alert("BLE/Audio Error: " + e.message);
+    }
+}
+
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    const tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
+    
+    while(packetBuffer.length >= 33) {
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
+        }
+        
+        if(head === -1) {
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33);
+            break;
+        }
+        
+        if(head > 0) {
+            packetBuffer = packetBuffer.slice(head); continue;
+        }
+        
+        // Парсим пакет и сразу считаем DSP (быстрые IIR фильтры)
+        processEEGSample(packetBuffer.slice(0, 33));
+        
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+// === EEG DSP (НА БАЗЕ IIR-ФИЛЬТРОВ, СВЕРХБЫСТРО) ===
+const eegState = {
+    raw: new Float32Array(8),
+    filters: [ // Delta, Theta, Alpha, Gamma
+        { a: [1, -1.99, 0.99], b: [0.0025, 0, -0.0025] }, // Delta
+        { a: [1, -1.97, 0.97], b: [0.014, 0, -0.014] },  // Theta
+        { a: [1, -1.90, 0.95], b: [0.02, 0, -0.02] },    // Alpha
+        { a: [1, -1.17, 0.80], b: [0.1, 0, -0.1] }       // Gamma
+    ],
+    filterState: Array.from({length:4}, () => Array.from({length:8}, ()=>({x1:0, x2:0, y1:0, y2:0}))),
+    amps: [0, 0, 0, 0], // delta, theta, alpha, gamma
+    vec2d: new Float32Array(2) // x, y
+};
+
+function processEEGSample(pkt) {
+    let mean = 0;
+    for(let i=0; i<8; i++) {
+        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
+        if(v & 0x800000) v -= 0x1000000;
+        eegState.raw[i] = v * UV_SCALE;
+        mean += eegState.raw[i];
+    }
+    mean /= 8.0;
+
+    // Считаем пространственный вектор (как в GPU коде)
+    let vx = 0, vy = 0;
+    for(let i=0; i<8; i++) {
+        const centered = eegState.raw[i] - mean;
+        vx += centered * COS_TABLE[i];
+        vy += centered * SIN_TABLE[i];
+    }
+    // Сглаживание
+    eegState.vec2d[0] = eegState.vec2d[0] * 0.95 + vx * 0.05;
+    eegState.vec2d[1] = eegState.vec2d[1] * 0.95 + vy * 0.05;
+    
+    const globalSignal = eegState.raw.reduce((a,b) => a+b, 0) / 8.0;
+
+    // Прогоняем через IIR фильтры
+    for (let band = 0; band < 4; band++) {
+        const F = eegState.filters[band];
+        let bandSum = 0;
+        
+        for (let ch = 0; ch < 8; ch++) {
+            const S = eegState.filterState[band][ch];
+            const input = (band < 2) ? globalSignal : (eegState.raw[ch] - mean); // Глобальные для Delta/Theta
+            
+            const out = F.b[0]*input + F.b[1]*S.x1 + F.b[2]*S.x2 - F.a[1]*S.y1 - F.a[2]*S.y2;
+            S.x2=S.x1; S.x1=input; S.y2=S.y1; S.y1=out;
+            bandSum += Math.abs(out);
+        }
+        eegState.amps[band] = eegState.amps[band] * 0.9 + (bandSum/8.0) * 0.1;
+    }
+    
+    // Обновляем глобальные нейро-параметры для аудио-потока
+    neuroParams.deltaAmp = eegState.amps[0] * 5.0; // Усиляем для эффекта
+    neuroParams.thetaAmp = eegState.amps[1] * 3.0;
+    neuroParams.alphaAmp = eegState.amps[2] * 2.0;
+    neuroParams.gammaAmp = eegState.amps[3] * 1.5;
+    neuroParams.leadX = eegState.vec2d[0];
+    neuroParams.leadY = eegState.vec2d[1];
+}
+
+// === WEB AUDIO API SETUP ===
+async function initAudio() {
+    const audioCtx = new AudioContext({ sampleRate: 44100 });
+    
+    // 1. Захват микрофона
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioCtx.createMediaStreamSource(stream);
+    
+    // 2. FFT анализатор для инструмента
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    // 3. Создаем AudioWorklet для генерации звука
+    const workletCode = `
+        class PsytranceProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                // Состояние синтезаторов
+                this.timers = { kick: 10, bass: 10 };
+                this.phases = { lead_c: 0, lead_m: 0 };
+                this.neuro = {};
+                this.instrument = { rhythm: 0, tonality: 0 };
+                this.port.onmessage = (e) => {
+                    if (e.data.type === 'neuro') this.neuro = e.data.payload;
+                    if (e.data.type === 'instrument') this.instrument = e.data.payload;
+                };
+            }
+
+            process(inputs, outputs, parameters) {
+                const outL = outputs[0][0];
+                const outR = outputs[0][1];
+                const dt = 1.0 / sampleRate;
+
+                for (let i = 0; i < outL.length; i++) {
+                    let mixL = 0, mixR = 0;
+                    
+                    const np = this.neuro; // neuro params
+                    const ip = this.instrument; // instrument params
+                    
+                    // --- KICK (Delta) ---
+                    if (np.deltaAmp > 0.5) { // Simple trigger
+                        if (this.timers.kick > 5) this.timers.kick = 0;
+                    }
+                    if (this.timers.kick < 0.38) {
+                        const T = this.timers.kick;
+                        const decay = 16.0 - (ip.rhythm * 6.0); // Sustain от ритма
+                        const kick = Math.sin(6.28 * (48*T - 3.5*Math.exp(-55*T))) * Math.exp(-decay*T) * np.clip(np.deltaAmp*2.2, 0.6, 1.6);
+                        mixL += kick * 1.4;
+                        this.timers.kick += dt;
+                    }
+                    
+                    // --- BASS (Theta) ---
+                    if (np.thetaAmp > 0.3) {
+                       if (this.timers.bass > 0.48) this.timers.bass = 0;
+                    }
+                    if (this.timers.bass < 0.48) {
+                        const T = this.timers.bass;
+                        const osc = 2*((T % 1.0)-0.5) * Math.exp(-13*T) * np.clip(np.thetaAmp*1.9, 0.35, 1.0);
+                        const sat = 2.2 + np.thetaAmp * 5.0 + (ip.rhythm * 3.0);
+                        const bass = Math.tanh(osc * sat);
+                        mixL += bass * 1.15;
+                        this.timers.bass += dt;
+                    }
+                    
+                    // --- ALPHA LEAD ---
+                    const lead_vol = np.clip((np.alphaAmp - 0.06)*6, 0, 0.72);
+                    if(lead_vol > 0.01) {
+                         const slide_mod = ip.tonality * 100.0;
+                         const c_freq = (150 + np.leadX * 360) + slide_mod;
+                         this.phases.lead_c += c_freq * dt;
+                         this.phases.lead_m += (c_freq*0.5) * dt;
+                         const fm_depth = 3.5 + (ip.rhythm * 2.5);
+                         const lead = Math.sin(6.28*this.phases.lead_c + fm_depth * Math.sin(6.28*this.phases.lead_m));
+                         mixR += lead * lead_vol * 0.58 * Math.exp(-((np.thetaAmp*2)%1)*7);
+                    }
+
+                    outL[i] = Math.tanh(mixL * 2.0);
+                    outR[i] = Math.tanh(mixR * 2.0);
+                }
+                
+                return true;
+            }
+        }
+        
+        // Вспомогательные функции (numpy)
+        const np = {
+            clip: (val, min, max) => Math.max(min, Math.min(val, max))
+        };
+
+        registerProcessor('psytrance-processor', PsytranceProcessor);
+    `;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletURL = URL.createObjectURL(blob);
+    await audioCtx.audioWorklet.addModule(workletURL);
+    
+    audioWorkletNode = new AudioWorkletNode(audioCtx, 'psytrance-processor');
+    audioWorkletNode.connect(audioCtx.destination);
+    
+    // Запускаем анализ инструмента
+    const freqData = new Uint8Array(analyser.frequencyBinCount);
+    setInterval(() => {
+        analyser.getByteFrequencyData(freqData);
+        const energy = freqData.reduce((a,b)=>a+b, 0) / freqData.length / 255.0;
+        let centroid = 0;
+        let totalMag = 0;
+        if(energy > 0.01) {
+            for(let i=0; i<freqData.length; i++) {
+                const f = i * (audioCtx.sampleRate / 2 / freqData.length);
+                centroid += f * freqData[i];
+                totalMag += freqData[i];
+            }
+            if(totalMag > 0) centroid /= totalMag;
+        }
+        
+        // Отправляем данные в аудио-поток
+        audioWorkletNode.port.postMessage({
+            type: 'instrument',
+            payload: {
+                rhythm: Math.min(energy * 5.0, 1.0),
+                tonality: Math.min(centroid / 1500.0, 1.0)
+            }
+        });
+    }, 50); // Обновляем параметры инструмента 20 раз в секунду
+}
+
+// === CANVAS RENDER LOOP ===
+const canvas = document.getElementById('cvs');
+const ctx = canvas.getContext('2d', { alpha: false });
+function resize() { /* ... */ } //(Код для ресайза и геометрии оставляем как в примере Neural_Hyper-Web)
+window.onresize = resize; initGeometry(); initParticles(); resize();
+
+function animate() {
+    if(!isRunning) return;
+    
+    // Отправляем нейро-данные в аудио-поток
+    if(audioWorkletNode) {
+        audioWorkletNode.port.postMessage({ type: 'neuro', payload: neuroParams });
+    }
+    
+    // (Код отрисовки частиц, как в Neural_Hyper-Web)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'lighter';
+    
+    requestAnimationFrame(animate);
+}
+
+// === UI BINDINGS ===
+document.getElementById('btn-full').onclick = () => document.documentElement.requestFullscreen();
+document.getElementById('btn-conn').onclick = connectBLE;
+
+</script>
+</body>
+</html>
