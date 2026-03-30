@@ -50,7 +50,7 @@
 // === CONFIGURATION ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6; // Gain=32
+const UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
 const PARTICLE_COUNT = 1500;
 
 const ANGLES_RAD = [-1.256, -0.628, 0.628, 1.256, 1.885, 2.513, -2.513, -1.885];
@@ -84,7 +84,7 @@ let eegState = {
 };
 
 // === GEOMETRY & PARTICLES ===
-let width, height, cx, cy, radius;
+let cx, cy, radius;
 const nodes = [];
 const pairs = [];
 const particles = [];
@@ -234,6 +234,9 @@ async function initAudio() {
     source.connect(analyser);
 
     const workletCode = `
+        // ИСПРАВЛЕНИЕ: Вспомогательная функция должна быть ВНУТРИ worklet
+        const clip = (val, min, max) => Math.max(min, Math.min(val, max));
+
         class PsytranceProcessor extends AudioWorkletProcessor {
             constructor() {
                 super();
@@ -246,11 +249,13 @@ async function initAudio() {
                     if (e.data.type === 'instrument') this.instrument = e.data.payload;
                 };
             }
-            clip(val, min, max) { return Math.max(min, Math.min(val, max)); }
 
             process(inputs, outputs, parameters) {
+                // ИСПРАВЛЕНИЕ: Защита от вызова до инициализации
+                if (!outputs[0] || !outputs[0][0]) { return true; }
+
                 const outL = outputs[0][0];
-                const outR = outputs[0][1];
+                const outR = outputs[0][1] || outL; // Fallback to mono
                 const dt = 1.0 / sampleRate;
 
                 for (let i = 0; i < outL.length; i++) {
@@ -262,7 +267,7 @@ async function initAudio() {
                     if (this.timers.kick < 0.38) {
                         const T = this.timers.kick;
                         const decay = 16.0 - (ip.rhythm * 6.0);
-                        const kick = Math.sin(6.2832 * (48*T - 3.5*Math.exp(-55*T))) * Math.exp(-decay*T) * this.clip(np.deltaAmp*2.2, 0.6, 1.6);
+                        const kick = Math.sin(6.2832 * (48*T - 3.5*Math.exp(-55*T))) * Math.exp(-decay*T) * clip(np.deltaAmp*2.2, 0.6, 1.6);
                         mixL += kick * 1.4;
                         this.timers.kick += dt;
                     }
@@ -270,14 +275,14 @@ async function initAudio() {
                     if (np.thetaAmp > 0.6 && this.timers.bass > 1) this.timers.bass = 0;
                     if (this.timers.bass < 0.48) {
                         const T = this.timers.bass;
-                        const osc = 2*((T % 1.0)-0.5) * Math.exp(-13*T) * this.clip(np.thetaAmp*1.9, 0.35, 1.0);
+                        const osc = 2*((T % 1.0)-0.5) * Math.exp(-13*T) * clip(np.thetaAmp*1.9, 0.35, 1.0);
                         const sat = 2.2 + np.thetaAmp * 5.0 + (ip.rhythm * 3.0);
                         const bass = Math.tanh(osc * sat);
                         mixL += bass * 1.15;
                         this.timers.bass += dt;
                     }
                     
-                    const lead_vol = this.clip((np.alphaAmp - 0.5)*6, 0, 0.72);
+                    const lead_vol = clip((np.alphaAmp - 0.5)*6, 0, 0.72);
                     if(lead_vol > 0.01) {
                          const slide_mod = ip.tonality * 100.0;
                          const c_freq = (150 + np.leadX * 360) + slide_mod;
@@ -333,6 +338,18 @@ const canvas = document.getElementById('cvs');
 const ctx = canvas.getContext('2d', { alpha: false });
 let runningMax = 1.0;
 
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cx = canvas.width / 2;
+    cy = canvas.height / 2;
+    radius = Math.min(cx, cy) * 0.9;
+    initGeometry();
+}
+window.onresize = resize;
+resize();
+initParticles();
+
 function animate() {
     if(!isRunning) { requestAnimationFrame(animate); return; }
     
@@ -351,7 +368,9 @@ function animate() {
 
     for(let i=0; i<PARTICLE_COUNT; i++) {
         const p = particles[i];
+        if(!p) continue; // Защита
         const pair = pairs[p.pairIdx];
+        if(!pair) continue; // Защита
         const band = BANDS[p.bandIdx];
         
         const amp = eegState.amps[p.bandIdx] * scale;
