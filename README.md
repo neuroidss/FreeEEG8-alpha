@@ -1,6 +1,6 @@
 # FreeEEG8-alpha
 
-[Hyperspiral_Psytrance](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Hyperspiral_Psytrance.html)
+[Emergent_Psytrance](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Emergent_Psytrance.html)
 
 [Motor_Imagery_Web-Synth](https://neuroidss.github.io/FreeEEG8-alpha/psytrance/Motor_Imagery_Web-Synth.html)
 
