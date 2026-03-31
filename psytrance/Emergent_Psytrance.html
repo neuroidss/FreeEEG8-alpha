@@ -79,6 +79,7 @@ let channelBuffers = Array.from({ length: CHANNELS }, () => new Float32Array(FFT
 let packetBuffer = new Uint8Array(); 
 let audioCtx = null;
 let audioWorkletNode = null;
+let isRunning = false;
 
 // Нейро-параметры для передачи в синтезатор
 let neuroParams = {
