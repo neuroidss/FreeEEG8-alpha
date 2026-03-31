@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Emergent Psytrance Web</title>
+    <style>
+        body { 
+            margin: 0; background: #080808; overflow: hidden; 
+            font-family: 'Courier New', monospace; color: #00ffcc;
+            touch-action: none;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.85); z-index: 10; transition: opacity 0.5s;
+        }
+        
+        button {
+            background: rgba(0, 255, 204, 0.1); color: #00ffcc;
+            border: 2px solid #00ffcc; padding: 20px 40px;
+            font-size: 18px; font-weight: bold; border-radius: 50px;
+            margin: 10px; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2); backdrop-filter: blur(5px);
+        }
+        button:active { background: #00ffcc; color: #000; }
+        
+        #hud {
+            position: absolute; top: 20px; left: 20px; z-index: 5;
+            font-size: 16px; font-weight: bold; text-shadow: 0 0 5px #00ffcc;
+            pointer-events: none;
+        }
+        #hud-title { font-size: 24px; margin-bottom: 10px; color: #fff; text-shadow: 0 0 10px #fff; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <h1 style="color:white; text-shadow: 0 0 15px #fff; text-align: center;">EMERGENT PSYTRANCE</h1>
+    <button id="btn-full">1. FULLSCREEN</button>
+    <button id="btn-conn">2. CONNECT & PLAY</button>
+</div>
+
+<div id="hud">
+    <div id="hud-title">FM LEAD RADAR</div>
+    <div id="hud-bpm">BPM: --</div>
+    <div id="hud-zoom">ZOOM: x1.0</div>
+</div>
+
+<canvas id="cvs"></canvas>
+
+<script>
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+
+let UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
+
+const SPATIAL_MATRIX = [[-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],[-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
+];
+
+class Biquad {
+    constructor(b0, b1, b2, a1, a2) {
+        this.b = [b0, b1, b2];
+        this.a =[1, a1, a2];
+        this.z1 = 0; this.z2 = 0;
+    }
+    process(x) {
+        let out = this.b[0]*x + this.z1;
+        this.z1 = this.b[1]*x - this.a[1]*out + this.z2;
+        this.z2 = this.b[2]*x - this.a[2]*out;
+        return out;
+    }
+}
+
+class FreqEstimator {
+    constructor(minF, maxF, defaultF) {
+        this.samples = 0; this.prev = 0; this.freq = defaultF;
+        this.minF = minF; this.maxF = maxF;
+    }
+    process(val) {
+        this.samples++;
+        if (val > 0 && this.prev <= 0) {
+            let f = 250.0 / this.samples;
+            if (f >= this.minF && f <= this.maxF) {
+                this.freq = this.freq * 0.9 + f * 0.1;
+            }
+            this.samples = 0;
+        }
+        this.prev = val;
+        return this.freq;
+    }
+}
+
+const filters = {
+    delta: new Biquad(0.007, 0, -0.007, -1.98, 0.985),
+    theta: new Biquad(0.017, 0, -0.017, -1.96, 0.965),
+    alphaX: new Biquad(0.025, 0, -0.025, -1.90, 0.95),
+    alphaY: new Biquad(0.025, 0, -0.025, -1.90, 0.95),
+    gamma: new Biquad(0.100, 0, -0.100, -1.17, 0.80)
+};
+
+const freqD = new FreqEstimator(1.0, 4.0, 2.0);
+const freqT = new FreqEstimator(4.0, 8.0, 6.0);
+
+let isRunning = false;
+let packetBuffer = new Uint8Array();
+let spiralHistory =[];
+let audioCtx = null;
+let audioWorkletNode = null;
+let viewZoom = 50.0; 
+
+let neuroParams = {
+    deltaAmp: 0, deltaFreq: 2.0,
+    thetaAmp: 0, thetaFreq: 6.0,
+    alphaXAmp: 0, alphaYAmp: 0,
+    gammaAmp: 0, leadX: 0, leadY: 0
+};
+
+// === BLE CONFIGURATION (Restored from Python) ===
+async function applyStageSettings(service) {
+    try {
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        const stage = 4;
+        const presets = { 4:[7, 5, 0, 0x000F] };
+        const [sps, pga, mux, dc] = presets[stage];
+
+        async function writeReg(addr, val, mask=null) {
+            let cmd = mask ? new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
+            await cmdChar.writeValueWithoutResponse(cmd);
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+        console.log("Setting up device...");
+        await writeReg(0x08, dc, 0x000F);
+        await writeReg(0x03, sps << 2, 0x001C);
+        
+        let pga_val = (pga<<12)|(pga<<8)|(pga<<4)|pga;
+        await writeReg(0x04, pga_val);
+        await writeReg(0x05, pga_val);
+        
+        for (let i = 0; i < 8; i++) {
+            await writeReg(0x09 + i*5, mux, 0x0003);
+        }
+
+        const gains = [1, 1, 4, 8, 16, 32];
+        const gain_real = gains[pga];
+        UV_SCALE = (1.2 / gain_real / 8388607.0) * 1e6;
+        console.log("Device configured successfully.");
+
+    } catch (err) {
+        console.error("Config error: ", err);
+    }
+}
+
+async function connectBLE() {
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+        }
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+
+        document.getElementById('btn-conn').innerText = "SCANNING...";
+        
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
+        });
+        
+        document.getElementById('btn-conn').innerText = "CONNECTING...";
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        // APPLY HARDWARE SETTINGS
+        await applyStageSettings(service);
+        
+        await initAudioWorklet();
+
+        const dataChar = await service.getCharacteristic(CHAR_UUID);
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', onData);
+        
+        document.getElementById('ui-layer').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
+        
+        isRunning = true;
+        animateCanvas();
+    } catch(e) {
+        alert("BLE Error: " + e.message);
+        document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
+    }
+}
+
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    let tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
+    
+    while(packetBuffer.length >= 33) {
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
+        }
+        if(head === -1) { 
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); 
+            break; 
+        }
+        if(head > 0) { 
+            packetBuffer = packetBuffer.slice(head); 
+            continue; 
+        }
+        
+        processEEGSample(packetBuffer.slice(0, 33));
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+function processEEGSample(pkt) {
+    let raw = new Float32Array(8);
+    let mean = 0;
+    for(let i=0; i<8; i++) {
+        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
+        if(v & 0x800000) v -= 0x1000000;
+        raw[i] = v * UV_SCALE;
+        mean += raw[i];
+    }
+    mean /= 8.0;
+
+    let globalSig = 0, vecX = 0, vecY = 0;
+    for(let i=0; i<8; i++) {
+        let centered = raw[i] - mean;
+        globalSig += centered;
+        vecX += centered * SPATIAL_MATRIX[0][i];
+        vecY += centered * SPATIAL_MATRIX[1][i];
+    }
+    globalSig /= 8.0;
+
+    let valD = filters.delta.process(globalSig);
+    let valT = filters.theta.process(globalSig);
+    let valAx = filters.alphaX.process(vecX);
+    let valAy = filters.alphaY.process(vecY);
+    let valG = filters.gamma.process(globalSig);
+
+    neuroParams.deltaAmp = neuroParams.deltaAmp * 0.98 + Math.abs(valD) * 0.02 * 2.0;
+    neuroParams.thetaAmp = neuroParams.thetaAmp * 0.98 + Math.abs(valT) * 0.02 * 2.0;
+    neuroParams.alphaXAmp= neuroParams.alphaXAmp* 0.98 + Math.abs(valAx)* 0.02;
+    neuroParams.alphaYAmp= neuroParams.alphaYAmp* 0.98 + Math.abs(valAy)* 0.02;
+    neuroParams.gammaAmp = neuroParams.gammaAmp * 0.95 + Math.abs(valG) * 0.05 * 5.0;
+
+    neuroParams.deltaFreq = freqD.process(valD);
+    neuroParams.thetaFreq = freqT.process(valT);
+    neuroParams.leadX = valAx;
+    neuroParams.leadY = valAy;
+
+    let totalAlphaAmp = neuroParams.alphaXAmp + neuroParams.alphaYAmp;
+
+    spiralHistory.push({ x: valAx, y: valAy, a: totalAlphaAmp });
+    if(spiralHistory.length > 500) spiralHistory.shift();
+
+    if(audioWorkletNode && Math.random() < 0.1) {
+        audioWorkletNode.port.postMessage(neuroParams);
+    }
+
+    if(Math.random() < 0.05) {
+        document.getElementById('hud-bpm').innerText = `BPM: ${(neuroParams.deltaFreq * 60).toFixed(0)}`;
+    }
+}
+
+// === AUDIO WORKLET (Psytrance Synth) ===
+async function initAudioWorklet() {
+    const workletCode = `
+        const clip = (val, min, max) => Math.max(min, Math.min(val, max));
+
+        class PsytranceProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this.p = { d: 0, t: 0, fm_c: 0, fm_m: 0 };
+                this.timers = { kick: 10 };
+                this.delayBuf =[new Float32Array(88200), new Float32Array(88200)]; 
+                this.delayPtr = 0;
+                this.np = { deltaAmp:0, deltaFreq:2, thetaAmp:0, thetaFreq:6, alphaXAmp:0, alphaYAmp:0, gammaAmp:0, leadX:0, leadY:0 };
+                
+                this.port.onmessage = (e) => { this.np = e.data; };
+            }
+
+            process(inputs, outputs) {
+                if(!outputs[0] || !outputs[0][0]) return true;
+                const outL = outputs[0][0]; 
+                const outR = outputs[0][1] || outL;
+                const dt = 1.0 / sampleRate;
+                const np = this.np;
+
+                let fd = clip(np.deltaFreq, 1.0, 4.0);
+                let ft = clip(np.thetaFreq, 3.0, 12.0);
+
+                for (let i = 0; i < outL.length; i++) {
+                    let mixL = 0, mixR = 0;
+
+                    let old_pd = this.p.d;
+                    this.p.d = (this.p.d + fd * dt) % 1.0;
+                    this.p.t = (this.p.t + ft * dt) % 1.0;
+
+                    // KICK
+                    if (this.p.d < old_pd) this.timers.kick = 0;
+                    if (this.timers.kick < 0.38) {
+                        let T = this.timers.kick;
+                        let env = Math.exp(-(this.p.d) * 10.0);
+                        let pitch = 40 + 150 * Math.exp(-(this.p.d) * 20.0);
+                        mixL += Math.sin(6.2832 * pitch * this.p.d) * env * clip(np.deltaAmp*2.0, 0.5, 1.0) * 1.4;
+                        this.timers.kick += dt;
+                    }
+
+                    // BASS
+                    let b_raw = 2.0 * (this.p.t - 0.5);
+                    let b_env = Math.exp(-this.p.t * 8.0);
+                    mixL += Math.tanh(b_raw * b_env * (2.2 + np.thetaAmp*5)) * clip(np.thetaAmp*1.5, 0.2, 0.8) * 1.15;
+
+                    // FM LEAD
+                    let c_freq = 150.0 + np.alphaXAmp * 300.0;
+                    let m_freq = 50.0 + np.alphaYAmp * 100.0;
+                    let m_index = 2.0 + np.alphaYAmp * 5.0;
+                    
+                    this.p.fm_c = (this.p.fm_c + c_freq * dt) % 1.0;
+                    this.p.fm_m = (this.p.fm_m + m_freq * dt) % 1.0;
+                    
+                    let lead_wave = Math.sin(6.2832 * this.p.fm_c + m_index * Math.sin(6.2832 * this.p.fm_m));
+                    let lead_env = Math.exp(-((this.p.t * 2) % 1.0) * 5.0);
+                    let lead_vol = clip((np.alphaXAmp - 0.06)*6, 0, 0.72);
+                    let lead = lead_wave * lead_env * lead_vol * 0.8;
+                    mixR += lead * 0.58;
+
+                    // HATS
+                    let noise = Math.random() * 2 - 1;
+                    let hat_env = Math.exp(-((this.p.t * 4) % 1.0) * 20.0);
+                    let hats = noise * hat_env * clip(np.gammaAmp*2.0, 0, 0.5) * 0.65;
+                    mixL += hats; mixR += hats;
+
+                    // MASTER & DELAY
+                    mixL = Math.tanh(mixL * 2.2) * 0.0018;
+                    mixR = Math.tanh(mixR * 2.2) * 0.0018;
+                    
+                    let drive = clip(np.gammaAmp * 1.8, 0, 1.0);
+                    mixL = Math.tanh(mixL * (1.0 + drive * 2.5));
+                    mixR = Math.tanh(mixR * (1.0 + drive * 2.5));
+
+                    let d_mix = clip(0.6 - np.gammaAmp + np.alphaXAmp, 0.1, 0.8);
+                    let d_samp = Math.floor(0.28 * sampleRate);
+                    let didx = (this.delayPtr - d_samp + this.delayBuf[0].length) % this.delayBuf[0].length;
+                    let eL = this.delayBuf[0][didx];
+                    let eR = this.delayBuf[1][didx];
+
+                    this.delayBuf[0][this.delayPtr] = mixL + eR * 0.55;
+                    this.delayBuf[1][this.delayPtr] = mixR + eL * 0.55;
+                    this.delayPtr = (this.delayPtr + 1) % this.delayBuf[0].length;
+
+                    outL[i] = Math.tanh(mixL + eL * d_mix);
+                    outR[i] = Math.tanh(mixR + eR * d_mix);
+                }
+                return true;
+            }
+        }
+        registerProcessor('psy-synth', PsytranceProcessor);
+    `;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletURL = URL.createObjectURL(blob);
+    await audioCtx.audioWorklet.addModule(workletURL);
+    
+    audioWorkletNode = new AudioWorkletNode(audioCtx, 'psy-synth');
+    audioWorkletNode.connect(audioCtx.destination);
+}
+
+// === CANVAS VISUALIZATION (FAST, ZOOMABLE) ===
+const cvs = document.getElementById('cvs');
+const ctx = cvs.getContext('2d', {alpha: false});
+let cx, cy;
+
+function resize() {
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    cx = cvs.width / 2; cy = cvs.height / 2;
+}
+window.onresize = resize; resize();
+
+// Zoom handling
+window.addEventListener('wheel', (e) => {
+    viewZoom -= e.deltaY * 0.1;
+    if (viewZoom < 5.0) viewZoom = 5.0;
+    if (viewZoom > 2000.0) viewZoom = 2000.0;
+    document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/50.0).toFixed(1)}`;
+}, {passive: true});
+
+// Touch zoom (Mobile pinch)
+let initialDistance = null;
+window.addEventListener('touchstart', (e) => {
+    if(e.touches.length === 2) {
+        initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    }
+});
+window.addEventListener('touchmove', (e) => {
+    if(e.touches.length === 2 && initialDistance !== null) {
+        let currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        let delta = currentDistance - initialDistance;
+        viewZoom += delta * 0.5;
+        if (viewZoom < 5.0) viewZoom = 5.0;
+        if (viewZoom > 2000.0) viewZoom = 2000.0;
+        initialDistance = currentDistance;
+        document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/50.0).toFixed(1)}`;
+    }
+});
+
+function animateCanvas() {
+    if(!isRunning) return;
+    
+    // Clear screen (No shadows for high FPS!)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    
+    ctx.globalCompositeOperation = 'lighter';
+    
+    if(spiralHistory.length > 2) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        ctx.beginPath();
+        for(let i=1; i<spiralHistory.length; i++) {
+            const p1 = spiralHistory[i-1];
+            const p2 = spiralHistory[i];
+            
+            const x1 = cx + p1.x * viewZoom;
+            const y1 = cy + p1.y * viewZoom;
+            const x2 = cx + p2.x * viewZoom;
+            const y2 = cy + p2.y * viewZoom;
+            
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+        }
+        ctx.strokeStyle = `rgba(0, 255, 204, 0.8)`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Head of the spiral
+        const last = spiralHistory[spiralHistory.length-1];
+        ctx.beginPath();
+        ctx.arc(cx + last.x * viewZoom, cy + last.y * viewZoom, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+    }
+    
+    requestAnimationFrame(animateCanvas);
+}
+
+// === UI BINDINGS ===
+document.getElementById('btn-full').onclick = () => { if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); };
+document.getElementById('btn-conn').onclick = connectBLE;
+
+</script>
+</body>
+</html>
