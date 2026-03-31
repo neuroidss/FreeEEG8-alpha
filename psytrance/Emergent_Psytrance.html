@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Emergent Psytrance (Pro DSP Edition)</title>
+    <title>Emergent Psytrance</title>
     <style>
         body { 
             margin: 0; background: #080808; overflow: hidden; 
             font-family: 'Courier New', monospace; color: #00ffcc;
-            touch-action: none; 
+            touch-action: none; /* Блокируем скролл страницы для зума на мобильных */
         }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
@@ -38,7 +38,7 @@
         #hud {
             position: absolute; top: 20px; left: 20px; z-index: 5;
             font-size: 16px; font-weight: bold; text-shadow: 0 0 5px #00ffcc;
-            pointer-events: none;
+            pointer-events: none; line-height: 1.5;
         }
         #hud-title { font-size: 24px; margin-bottom: 10px; color: #fff; text-shadow: 0 0 10px #fff; }
     </style>
@@ -46,7 +46,7 @@
 <body>
 
 <div id="ui-layer">
-    <h1 style="color:white; text-shadow: 0 0 15px #fff; text-align: center;">EMERGENT PSYTRANCE<br><span style="font-size:16px; color:#0f0;">PRO DSP ENGINE</span></h1>
+    <h1 style="color:white; text-shadow: 0 0 15px #fff; text-align: center;">EMERGENT PSYTRANCE</h1>
     
     <div class="controls">
         <label style="font-size: 18px; font-weight: bold;">ADC GAIN:</label>
@@ -65,6 +65,7 @@
 
 <div id="hud">
     <div id="hud-title">FM LEAD RADAR</div>
+    <div id="hud-zoom" style="color:#fff;">ZOOM: x1.0</div>
     <div id="hud-bpm">TEMPO: -- BPM</div>
     <div id="hud-bass">BASS: -- Hz</div>
     <div id="hud-style">STYLE: WAITING</div>
@@ -79,22 +80,20 @@ const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 
 const EEG_FS = 250;
-const BUF_SIZE = 1024; // ~4 сек, степень двойки для FFT
+const BUF_SIZE = 1024; // 4.096 сек (оптимально для FFT)
 
 let UV_SCALE = (1.2 / 8 / 8388607.0) * 1e6;
 
+// Матрица для круга 10мм
 const SPATIAL_MATRIX = [
     [-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],
     [-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
 ];
 
-// === FAST INLINE FFT (Репликация PyTorch FFT) ===
+// === FAST FFT (Точный аналог torch.fft) ===
 function reverseBits(x, n) {
     let res = 0;
-    for (let i = 0; (1 << i) < n; i++) {
-        res = (res << 1) | (x & 1);
-        x >>= 1;
-    }
+    for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
     return res;
 }
 
@@ -102,26 +101,18 @@ function fft(re, im) {
     const n = re.length;
     for (let i = 0; i < n; i++) {
         let j = reverseBits(i, n);
-        if (j > i) {
-            let tr = re[i], ti = im[i];
-            re[i] = re[j]; im[i] = im[j];
-            re[j] = tr; im[j] = ti;
-        }
+        if (j > i) { let tr = re[i], ti = im[i]; re[i] = re[j]; im[i] = im[j]; re[j] = tr; im[j] = ti; }
     }
     for (let step = 2; step <= n; step <<= 1) {
-        let half = step >> 1;
-        let theta = -2 * Math.PI / step;
+        let half = step >> 1, theta = -2 * Math.PI / step;
         let wr = Math.cos(theta), wi = Math.sin(theta);
         for (let i = 0; i < n; i += step) {
             let ar = 1, ai = 0;
             for (let j = 0; j < half; j++) {
                 let i1 = i + j, i2 = i + j + half;
-                let tr = ar * re[i2] - ai * im[i2];
-                let ti = ar * im[i2] + ai * re[i2];
-                re[i2] = re[i1] - tr; im[i2] = im[i1] - ti;
-                re[i1] += tr; im[i1] += ti;
-                let nar = ar * wr - ai * wi;
-                let nai = ar * wi + ai * wr;
+                let tr = ar * re[i2] - ai * im[i2], ti = ar * im[i2] + ai * re[i2];
+                re[i2] = re[i1] - tr; im[i2] = im[i1] - ti; re[i1] += tr; im[i1] += ti;
+                let nar = ar * wr - ai * wi, nai = ar * wi + ai * wr;
                 ar = nar; ai = nai;
             }
         }
@@ -130,36 +121,22 @@ function fft(re, im) {
 
 function ifft(re, im) {
     const n = re.length;
-    for (let i = 0; i < n; i++) im[i] = -im[i]; // conjugate
+    for (let i = 0; i < n; i++) im[i] = -im[i];
     fft(re, im);
-    for (let i = 0; i < n; i++) {
-        re[i] = re[i] / n;
-        im[i] = -(im[i] / n); 
-    }
+    for (let i = 0; i < n; i++) { re[i] /= n; im[i] = -im[i] / n; }
 }
 
 function extractBandFeatures(signal, low, high) {
-    let re = new Float32Array(signal);
-    let im = new Float32Array(BUF_SIZE);
-    
+    let re = new Float32Array(signal), im = new Float32Array(BUF_SIZE);
     fft(re, im);
 
-    // Analytic Signal Mask (как в PyTorch)
     for(let i = 0; i < BUF_SIZE; i++) {
         let freq = i * (EEG_FS / BUF_SIZE);
-        if (i > BUF_SIZE/2) freq = (BUF_SIZE - i) * (EEG_FS / BUF_SIZE); // Negative freqs
-        
+        if (i > BUF_SIZE/2) freq = (BUF_SIZE - i) * (EEG_FS / BUF_SIZE);
         let mask = (freq >= low && freq <= high && i <= BUF_SIZE/2) ? 1 : 0;
-        
-        if (mask === 1) {
-            re[i] *= 2.0; // Analytic multiplier
-            im[i] *= 2.0;
-        } else {
-            re[i] = 0;
-            im[i] = 0;
-        }
+        if (mask) { re[i] *= 2.0; im[i] *= 2.0; } 
+        else { re[i] = 0; im[i] = 0; }
     }
-
     ifft(re, im);
 
     let meanAmp = 0, meanFreq = 0;
@@ -169,42 +146,40 @@ function extractBandFeatures(signal, low, high) {
     for(let i = BUF_SIZE - windowLen; i < BUF_SIZE; i++) {
         let amp = Math.sqrt(re[i]*re[i] + im[i]*im[i]);
         let phase = Math.atan2(im[i], re[i]);
-        
-        let phase_diff = phase - lastPhase;
-        // Unwrap phase
-        while(phase_diff > Math.PI) phase_diff -= 2*Math.PI;
-        while(phase_diff < -Math.PI) phase_diff += 2*Math.PI;
-        
-        let inst_freq = phase_diff * (EEG_FS / (2 * Math.PI));
+        let p_diff = phase - lastPhase;
+        while(p_diff > Math.PI) p_diff -= 2*Math.PI;
+        while(p_diff < -Math.PI) p_diff += 2*Math.PI;
         
         meanAmp += amp;
-        if(i > BUF_SIZE - windowLen) meanFreq += Math.abs(inst_freq);
+        if(i > BUF_SIZE - windowLen) meanFreq += Math.abs(p_diff * (EEG_FS / (2 * Math.PI)));
         lastPhase = phase;
     }
-
     return { amp: meanAmp / windowLen, freq: meanFreq / (windowLen-1) };
 }
 
 // === STATE ===
 let isRunning = false;
 let packetBuffer = new Uint8Array();
-let spiralHistory = [];
-
-// Ring buffers for DSP
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-let bufferPtr = 0;
 let processCounter = 0;
 
 let audioCtx = null;
 let audioWorkletNode = null;
 
+// Переменные для визуализации
+let viewZoom = 200.0;
+let render_phase_x = 0;
+let render_phase_y = 0;
+let spiralHistory = [];
+
 let neuroParams = {
     deltaFreq: 2.0, deltaAmp: 0,
     thetaFreq: 6.0, thetaAmp: 0,
-    alphaXAmp: 0, alphaYAmp: 0, gammaAmp: 0
+    alphaXAmp: 0, alphaYAmp: 0, alphaXFreq: 10, alphaYFreq: 10,
+    gammaAmp: 0
 };
 
-// === AUDIO WORKLET (Psytrance Synth - 1:1 Python Math) ===
+// === AUDIO WORKLET (Чистый Psytrance) ===
 async function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
     if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -212,7 +187,6 @@ async function initAudio() {
     const workletCode = `
         const clip = (val, min, max) => Math.max(min, Math.min(val, max));
 
-        // Гауссовский шум для хайхэтов (как np.random.normal)
         function gaussianNoise() {
             let u = 0, v = 0;
             while(u === 0) u = Math.random();
@@ -226,25 +200,19 @@ async function initAudio() {
                 this.p = { d: 0, t: 0, fm_c: 0, fm_m: 0 };
                 this.delayBuf = [new Float32Array(88200), new Float32Array(88200)]; 
                 this.delayPtr = 0;
-                
-                // Целевые параметры от Main Thread
                 this.target = { deltaFreq:2, deltaAmp:0, thetaFreq:6, thetaAmp:0, alphaXAmp:0, alphaYAmp:0, gammaAmp:0 };
-                
-                // Текущие сглаженные параметры (для устранения щелчков)
                 this.sm = { f_d:2, a_d:0, f_t:6, a_t:0, a_ax:0, a_ay:0, a_g:0 };
-                
                 this.port.onmessage = (e) => { this.target = e.data; };
             }
 
             process(inputs, outputs) {
                 if(!outputs[0] || !outputs[0][0]) return true;
-                const outL = outputs[0][0]; 
-                const outR = outputs[0][1] || outL;
+                const outL = outputs[0][0], outR = outputs[0][1] || outL;
                 const dt = 1.0 / sampleRate;
 
                 for (let i = 0; i < outL.length; i++) {
-                    // 1. Плавное подтягивание параметров (как smooth = 0.01 в Python)
-                    let smooth = 0.0005; // per-sample rate
+                    // Плавная интерполяция параметров (anti-zipper noise)
+                    let smooth = 0.0005;
                     this.sm.f_d += smooth * (this.target.deltaFreq - this.sm.f_d);
                     this.sm.a_d += smooth * (this.target.deltaAmp - this.sm.a_d);
                     this.sm.f_t += smooth * (this.target.thetaFreq - this.sm.f_t);
@@ -253,27 +221,24 @@ async function initAudio() {
                     this.sm.a_ay += smooth * (this.target.alphaYAmp - this.sm.a_ay);
                     this.sm.a_g += smooth * (this.target.gammaAmp - this.sm.a_g);
 
-                    let fd = clip(this.sm.f_d, 1.0, 4.0);
-                    let ft = clip(this.sm.f_t, 3.0, 12.0);
+                    let fd = clip(this.sm.f_d, 1.0, 4.0), ft = clip(this.sm.f_t, 3.0, 12.0);
 
-                    // Фазы
                     this.p.d = (this.p.d + fd * dt) % 1.0;
                     this.p.t = (this.p.t + ft * dt) % 1.0;
 
                     let mixL = 0, mixR = 0;
 
-                    // === KICK (Delta) ===
+                    // KICK
                     let kick_env = Math.exp(-this.p.d * 10.0);
                     let kick_pitch = 40.0 + 150.0 * Math.exp(-this.p.d * 20.0);
-                    let kick_wave = Math.sin(2.0 * Math.PI * kick_pitch * this.p.d) * kick_env;
-                    let kick = kick_wave * clip(this.sm.a_d * 2.0, 0.5, 1.0);
+                    let kick = Math.sin(2.0 * Math.PI * kick_pitch * this.p.d) * kick_env * clip(this.sm.a_d * 2.0, 0.5, 1.0);
 
-                    // === BASSLINE (Theta) ===
+                    // BASS
                     let bass_raw = 2.0 * (this.p.t - 0.5);
                     let bass_env = Math.exp(-this.p.t * 8.0);
                     let bass = bass_raw * bass_env * clip(this.sm.a_t * 1.5, 0.2, 0.8);
 
-                    // === FM LEAD (Alpha X / Y) ===
+                    // FM LEAD
                     let c_freq = 150.0 + this.sm.a_ax * 300.0;
                     let m_freq = 50.0 + this.sm.a_ay * 100.0;
                     let m_index = 2.0 + this.sm.a_ay * 5.0;
@@ -285,32 +250,27 @@ async function initAudio() {
                     let lead_env = Math.exp(-((this.p.t * 2.0) % 1.0) * 5.0);
                     let lead = lead_wave * lead_env * clip(this.sm.a_ax * 0.8, 0.0, 0.6);
 
-                    // === HATS (Gamma) ===
+                    // HATS
                     let hat_env = Math.exp(-((this.p.t * 4.0) % 1.0) * 20.0);
                     let hats = gaussianNoise() * hat_env * clip(this.sm.a_g * 2.0, 0.0, 0.5);
 
-                    // === MIXING ===
+                    // MIX & DELAY
                     let delay_mix = clip(0.6 - this.sm.a_g + this.sm.a_ax, 0.1, 0.8);
                     
                     mixL = kick + bass + lead * 0.8 + hats;
                     mixR = kick + bass + lead * 0.2 + hats;
 
-                    // Delay Buffer (Ping-Pong)
-                    let d_samp = Math.floor(0.3 * sampleRate); // 300ms
+                    let d_samp = Math.floor(0.3 * sampleRate);
                     let didx = (this.delayPtr - d_samp + this.delayBuf[0].length) % this.delayBuf[0].length;
-                    let eL = this.delayBuf[0][didx];
-                    let eR = this.delayBuf[1][didx];
+                    let eL = this.delayBuf[0][didx], eR = this.delayBuf[1][didx];
 
                     this.delayBuf[0][this.delayPtr] = mixL + eR * 0.5;
                     this.delayBuf[1][this.delayPtr] = mixR + eL * 0.5;
                     this.delayPtr = (this.delayPtr + 1) % this.delayBuf[0].length;
 
-                    let finalL = mixL + eL * delay_mix;
-                    let finalR = mixR + eR * delay_mix;
-
-                    // Soft Clipper (какт в Python)
-                    outL[i] = Math.tanh(finalL); 
-                    outR[i] = Math.tanh(finalR);
+                    // Soft Clipping
+                    outL[i] = Math.tanh(mixL + eL * delay_mix); 
+                    outR[i] = Math.tanh(mixR + eR * delay_mix);
                 }
                 return true;
             }
@@ -319,9 +279,7 @@ async function initAudio() {
     `;
 
     const blob = new Blob([workletCode], { type: 'application/javascript' });
-    const workletURL = URL.createObjectURL(blob);
-    
-    await audioCtx.audioWorklet.addModule(workletURL);
+    await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
     audioWorkletNode = new AudioWorkletNode(audioCtx, 'psy-synth');
     audioWorkletNode.connect(audioCtx.destination);
 }
@@ -330,30 +288,22 @@ async function initAudio() {
 async function applyStageSettings(service, pga) {
     try {
         const cmdChar = await service.getCharacteristic(CMD_UUID);
-        const stage = 4;
-        const presets = { 4:[7, pga, 0, 0x000F] };
-        const[sps, gain, mux, dc] = presets[stage];
-
         async function writeReg(addr, val, mask=null) {
             let cmd = mask ? new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
             await cmdChar.writeValueWithoutResponse(cmd);
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 100));
         }
 
-        console.log("Setting up device...");
-        await writeReg(0x08, dc, 0x000F);
-        await writeReg(0x03, sps << 2, 0x001C);
+        await writeReg(0x08, 0x000F, 0x000F); // DC Block
+        await writeReg(0x03, 5 << 2, 0x001C); // 250 SPS
         
-        let pga_val = (gain<<12)|(gain<<8)|(gain<<4)|gain;
-        await writeReg(0x04, pga_val);
-        await writeReg(0x05, pga_val);
-        
-        for (let i = 0; i < 8; i++) await writeReg(0x09 + i*5, mux, 0x0003);
+        let pga_val = (pga<<12)|(pga<<8)|(pga<<4)|pga;
+        await writeReg(0x04, pga_val); await writeReg(0x05, pga_val);
+        for (let i = 0; i < 8; i++) await writeReg(0x09 + i*5, 0, 0x0003);
 
         const gains = {5:32, 4:16, 3:8, 2:4, 7:128};
-        UV_SCALE = (1.2 / gains[gain] / 8388607.0) * 1e6;
-        console.log("Configured. Gain:", gains[gain]);
-    } catch (err) { console.error("Config error: ", err); }
+        UV_SCALE = (1.2 / gains[pga] / 8388607.0) * 1e6;
+    } catch (err) { console.error("Config error:", err); }
 }
 
 // === BLE CONNECTION ===
@@ -379,6 +329,7 @@ document.getElementById('btn-conn').onclick = async () => {
         setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
         
         isRunning = true;
+        lastRenderTime = performance.now();
         animateCanvas();
     } catch(e) {
         alert("Error: " + e.message);
@@ -397,59 +348,47 @@ function onData(e) {
         if(head === -1) { if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); break; }
         if(head > 0) { packetBuffer = packetBuffer.slice(head); continue; }
         
-        processEEGSample(packetBuffer.slice(0, 33));
-        packetBuffer = packetBuffer.slice(33);
-    }
-}
+        let mean = 0;
+        let raw = new Float32Array(8);
+        for(let i=0; i<8; i++) {
+            let v = (packetBuffer[head+2+i*3]<<16) | (packetBuffer[head+3+i*3]<<8) | packetBuffer[head+4+i*3];
+            if(v & 0x800000) v -= 0x1000000;
+            raw[i] = v * UV_SCALE;
+            mean += raw[i];
+        }
+        mean /= 8.0;
 
-function processEEGSample(pkt) {
-    let mean = 0;
-    let raw = new Float32Array(8);
-    for(let i=0; i<8; i++) {
-        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
-        if(v & 0x800000) v -= 0x1000000;
-        raw[i] = v * UV_SCALE;
-        mean += raw[i];
-    }
-    mean /= 8.0;
+        for(let c=0; c<8; c++) {
+            for(let i=0; i<BUF_SIZE-1; i++) eegBuffer[c][i] = eegBuffer[c][i+1];
+            eegBuffer[c][BUF_SIZE-1] = raw[c] - mean;
+        }
 
-    // Сдвиг буфера
-    for(let c=0; c<8; c++) {
-        for(let i=0; i<BUF_SIZE-1; i++) eegBuffer[c][i] = eegBuffer[c][i+1];
-        eegBuffer[c][BUF_SIZE-1] = raw[c] - mean; // Centered
-    }
-
-    processCounter++;
-    // Обновляем DSP каждые 10 семплов (40мс - как в Python)
-    if(processCounter >= 10) {
-        updateDSP();
-        processCounter = 0;
+        processCounter++;
+        // Обновляем DSP каждые 10 семплов (40мс)
+        if(processCounter >= 10) { updateDSP(); processCounter = 0; }
+        
+        packetBuffer = packetBuffer.slice(head + 33);
     }
 }
 
 function updateDSP() {
-    let global_sig = new Float32Array(BUF_SIZE);
-    let vecX = new Float32Array(BUF_SIZE);
-    let vecY = new Float32Array(BUF_SIZE);
+    let glob = new Float32Array(BUF_SIZE), vx = new Float32Array(BUF_SIZE), vy = new Float32Array(BUF_SIZE);
 
     for(let i=0; i<BUF_SIZE; i++) {
-        let sum = 0, vx = 0, vy = 0;
+        let sum = 0, x = 0, y = 0;
         for(let c=0; c<8; c++) {
             sum += eegBuffer[c][i];
-            vx += eegBuffer[c][i] * SPATIAL_MATRIX[0][c];
-            vy += eegBuffer[c][i] * SPATIAL_MATRIX[1][c];
+            x += eegBuffer[c][i] * SPATIAL_MATRIX[0][c];
+            y += eegBuffer[c][i] * SPATIAL_MATRIX[1][c];
         }
-        global_sig[i] = sum / 8.0;
-        vecX[i] = vx;
-        vecY[i] = vy;
+        glob[i] = sum / 8.0; vx[i] = x; vy[i] = y;
     }
 
-    // Извлекаем параметры строго через FFT как в PyTorch
-    let d = extractBandFeatures(global_sig, 1.0, 4.0);
-    let t = extractBandFeatures(global_sig, 4.0, 8.0);
-    let ax = extractBandFeatures(vecX, 8.0, 13.0);
-    let ay = extractBandFeatures(vecY, 8.0, 13.0);
-    let g = extractBandFeatures(global_sig, 30.0, 50.0);
+    let d = extractBandFeatures(glob, 1.0, 4.0);
+    let t = extractBandFeatures(glob, 4.0, 8.0);
+    let ax = extractBandFeatures(vx, 8.0, 13.0);
+    let ay = extractBandFeatures(vy, 8.0, 13.0);
+    let g = extractBandFeatures(glob, 30.0, 50.0);
 
     neuroParams = {
         deltaFreq: isNaN(d.freq)? 2.0 : d.freq,
@@ -458,17 +397,13 @@ function updateDSP() {
         thetaAmp: isNaN(t.amp)? 0 : t.amp * 2.0,
         alphaXAmp: isNaN(ax.amp)? 0 : ax.amp,
         alphaYAmp: isNaN(ay.amp)? 0 : ay.amp,
+        alphaXFreq: isNaN(ax.freq)? 10 : ax.freq,
+        alphaYFreq: isNaN(ay.freq)? 10 : ay.freq,
         gammaAmp: isNaN(g.amp)? 0 : g.amp * 5.0
     };
 
     if(audioWorkletNode) audioWorkletNode.port.postMessage(neuroParams);
 
-    // Добавляем гладкие точки в радар на основе отфильтрованных Альфа амплитуд
-    // (Поскольку Python рисует отфильтрованный FFT вектор)
-    spiralHistory.push({ x: ax.amp * Math.cos(Date.now()*0.005), y: ay.amp * Math.sin(Date.now()*0.005) });
-    if(spiralHistory.length > 200) spiralHistory.shift();
-
-    // Обновляем HUD
     let bpm = neuroParams.deltaFreq * 60;
     let genre = neuroParams.alphaXAmp > neuroParams.gammaAmp * 2 ? "PSYCHILL" : (neuroParams.gammaAmp > 1.0 ? "DARKPSY" : "PROGRESSIVE");
     document.getElementById('hud-bpm').innerText = `TEMPO: ${bpm.toFixed(0)} BPM`;
@@ -476,7 +411,28 @@ function updateDSP() {
     document.getElementById('hud-style').innerText = `STYLE: ${genre}`;
 }
 
-// === CANVAS VISUALIZATION (RADAR) ===
+// === ZOOM LOGIC ===
+window.addEventListener('wheel', e => { 
+    viewZoom -= e.deltaY * 0.5; 
+    viewZoom = Math.max(10, Math.min(viewZoom, 2000)); 
+    document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/200).toFixed(1)}`; 
+}, {passive:true});
+
+let initDist = null;
+window.addEventListener('touchstart', e => { 
+    if(e.touches.length===2) initDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); 
+});
+window.addEventListener('touchmove', e => {
+    if(e.touches.length===2 && initDist!==null) {
+        let dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        viewZoom += (dist - initDist) * 1.5; 
+        viewZoom = Math.max(10, Math.min(viewZoom, 2000)); 
+        initDist = dist;
+        document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/200).toFixed(1)}`;
+    }
+});
+
+// === CANVAS VISUALIZATION ===
 const cvs = document.getElementById('cvs');
 const ctx = cvs.getContext('2d', {alpha: false});
 let cx, cy;
@@ -487,11 +443,29 @@ function resize() {
 }
 window.onresize = resize; resize();
 
-function animateCanvas() {
+let lastRenderTime = 0;
+
+function animateCanvas(time) {
     if(!isRunning) return;
     
+    // Вычисляем дельту времени (dt)
+    let dt = (time - lastRenderTime) / 1000.0;
+    lastRenderTime = time;
+    if(dt > 0.1 || isNaN(dt)) dt = 0.016; // Защита от скачков
+    
+    // Интегрируем фазу с реальной частотой Альфа ритма мозга (8-13Hz)
+    render_phase_x += neuroParams.alphaXFreq * dt * Math.PI * 2;
+    render_phase_y += neuroParams.alphaYFreq * dt * Math.PI * 2;
+    
+    // Формируем фигуру Лиссажу
+    let x = neuroParams.alphaXAmp * Math.cos(render_phase_x);
+    let y = neuroParams.alphaYAmp * Math.sin(render_phase_y);
+    
+    spiralHistory.push({ x, y });
+    if(spiralHistory.length > 250) spiralHistory.shift(); // Длина следа
+    
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
+    ctx.fillStyle = 'rgba(8, 8, 8, 0.15)'; // Эффект затухания шлейфа
     ctx.fillRect(0, 0, cvs.width, cvs.height);
     ctx.globalCompositeOperation = 'lighter';
     
@@ -499,19 +473,19 @@ function animateCanvas() {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
-        let zoom = 500.0; // Масштаб для амплитуд радара
+        ctx.moveTo(cx + spiralHistory[0].x * viewZoom, cy + spiralHistory[0].y * viewZoom);
         
-        ctx.moveTo(cx + spiralHistory[0].x * zoom, cy + spiralHistory[0].y * zoom);
         for(let i=1; i<spiralHistory.length; i++) {
-            ctx.lineTo(cx + spiralHistory[i].x * zoom, cy + spiralHistory[i].y * zoom);
+            ctx.lineTo(cx + spiralHistory[i].x * viewZoom, cy + spiralHistory[i].y * viewZoom);
         }
         ctx.strokeStyle = `rgba(0, 255, 204, 0.8)`;
         ctx.lineWidth = 2;
         ctx.stroke();
         
+        // Рисуем головку "кометы"
         const last = spiralHistory[spiralHistory.length-1];
         ctx.beginPath();
-        ctx.arc(cx + last.x * zoom, cy + last.y * zoom, 5, 0, Math.PI*2);
+        ctx.arc(cx + last.x * viewZoom, cy + last.y * viewZoom, 4, 0, Math.PI*2);
         ctx.fillStyle = '#fff';
         ctx.fill();
     }
@@ -522,7 +496,6 @@ function animateCanvas() {
 document.getElementById('btn-full').onclick = () => { 
     if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); 
 };
-
 </script>
 </body>
 </html>
