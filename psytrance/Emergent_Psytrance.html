@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Emergent Psytrance Web</title>
+    <title>Emergent Psytrance</title>
     <style>
         body { 
             margin: 0; background: #080808; overflow: hidden; 
@@ -52,13 +52,14 @@
 <canvas id="cvs"></canvas>
 
 <script>
+// === CONFIG & MATH ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 
 let UV_SCALE = (1.2 / 32 / 8388607.0) * 1e6;
 
-const SPATIAL_MATRIX = [[-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],[-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
+const SPATIAL_MATRIX =[[-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],[-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
 ];
 
 class Biquad {
@@ -119,7 +120,7 @@ let neuroParams = {
     gammaAmp: 0, leadX: 0, leadY: 0
 };
 
-// === BLE CONFIGURATION (Restored from Python) ===
+// === BLE CONFIGURATION ===
 async function applyStageSettings(service) {
     try {
         const cmdChar = await service.getCharacteristic(CMD_UUID);
@@ -145,128 +146,13 @@ async function applyStageSettings(service) {
             await writeReg(0x09 + i*5, mux, 0x0003);
         }
 
-        const gains = [1, 1, 4, 8, 16, 32];
+        const gains =[1, 1, 4, 8, 16, 32];
         const gain_real = gains[pga];
         UV_SCALE = (1.2 / gain_real / 8388607.0) * 1e6;
         console.log("Device configured successfully.");
 
     } catch (err) {
         console.error("Config error: ", err);
-    }
-}
-
-async function connectBLE() {
-    try {
-        if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-        }
-        if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-        }
-
-        document.getElementById('btn-conn').innerText = "SCANNING...";
-        
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [SERVICE_UUID] }]
-        });
-        
-        document.getElementById('btn-conn').innerText = "CONNECTING...";
-        const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(SERVICE_UUID);
-        
-        // APPLY HARDWARE SETTINGS
-        await applyStageSettings(service);
-        
-        await initAudioWorklet();
-
-        const dataChar = await service.getCharacteristic(CHAR_UUID);
-        await dataChar.startNotifications();
-        dataChar.addEventListener('characteristicvaluechanged', onData);
-        
-        document.getElementById('ui-layer').style.opacity = 0;
-        setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
-        
-        isRunning = true;
-        animateCanvas();
-    } catch(e) {
-        alert("BLE Error: " + e.message);
-        document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
-    }
-}
-
-function onData(e) {
-    const val = new Uint8Array(e.target.value.buffer);
-    let tmp = new Uint8Array(packetBuffer.length + val.length);
-    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
-    packetBuffer = tmp;
-    
-    while(packetBuffer.length >= 33) {
-        let head = -1;
-        for(let i=0; i<packetBuffer.length-32; i++) {
-            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
-        }
-        if(head === -1) { 
-            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); 
-            break; 
-        }
-        if(head > 0) { 
-            packetBuffer = packetBuffer.slice(head); 
-            continue; 
-        }
-        
-        processEEGSample(packetBuffer.slice(0, 33));
-        packetBuffer = packetBuffer.slice(33);
-    }
-}
-
-function processEEGSample(pkt) {
-    let raw = new Float32Array(8);
-    let mean = 0;
-    for(let i=0; i<8; i++) {
-        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
-        if(v & 0x800000) v -= 0x1000000;
-        raw[i] = v * UV_SCALE;
-        mean += raw[i];
-    }
-    mean /= 8.0;
-
-    let globalSig = 0, vecX = 0, vecY = 0;
-    for(let i=0; i<8; i++) {
-        let centered = raw[i] - mean;
-        globalSig += centered;
-        vecX += centered * SPATIAL_MATRIX[0][i];
-        vecY += centered * SPATIAL_MATRIX[1][i];
-    }
-    globalSig /= 8.0;
-
-    let valD = filters.delta.process(globalSig);
-    let valT = filters.theta.process(globalSig);
-    let valAx = filters.alphaX.process(vecX);
-    let valAy = filters.alphaY.process(vecY);
-    let valG = filters.gamma.process(globalSig);
-
-    neuroParams.deltaAmp = neuroParams.deltaAmp * 0.98 + Math.abs(valD) * 0.02 * 2.0;
-    neuroParams.thetaAmp = neuroParams.thetaAmp * 0.98 + Math.abs(valT) * 0.02 * 2.0;
-    neuroParams.alphaXAmp= neuroParams.alphaXAmp* 0.98 + Math.abs(valAx)* 0.02;
-    neuroParams.alphaYAmp= neuroParams.alphaYAmp* 0.98 + Math.abs(valAy)* 0.02;
-    neuroParams.gammaAmp = neuroParams.gammaAmp * 0.95 + Math.abs(valG) * 0.05 * 5.0;
-
-    neuroParams.deltaFreq = freqD.process(valD);
-    neuroParams.thetaFreq = freqT.process(valT);
-    neuroParams.leadX = valAx;
-    neuroParams.leadY = valAy;
-
-    let totalAlphaAmp = neuroParams.alphaXAmp + neuroParams.alphaYAmp;
-
-    spiralHistory.push({ x: valAx, y: valAy, a: totalAlphaAmp });
-    if(spiralHistory.length > 500) spiralHistory.shift();
-
-    if(audioWorkletNode && Math.random() < 0.1) {
-        audioWorkletNode.port.postMessage(neuroParams);
-    }
-
-    if(Math.random() < 0.05) {
-        document.getElementById('hud-bpm').innerText = `BPM: ${(neuroParams.deltaFreq * 60).toFixed(0)}`;
     }
 }
 
@@ -279,7 +165,7 @@ async function initAudioWorklet() {
             constructor() {
                 super();
                 this.p = { d: 0, t: 0, fm_c: 0, fm_m: 0 };
-                this.timers = { kick: 10 };
+                this.timers = { kick: 10, bass: 10 };
                 this.delayBuf =[new Float32Array(88200), new Float32Array(88200)]; 
                 this.delayPtr = 0;
                 this.np = { deltaAmp:0, deltaFreq:2, thetaAmp:0, thetaFreq:6, alphaXAmp:0, alphaYAmp:0, gammaAmp:0, leadX:0, leadY:0 };
@@ -371,6 +257,122 @@ async function initAudioWorklet() {
     
     audioWorkletNode = new AudioWorkletNode(audioCtx, 'psy-synth');
     audioWorkletNode.connect(audioCtx.destination);
+
+    setInterval(() => {
+        if(isRunning && audioWorkletNode) {
+            audioWorkletNode.port.postMessage(neuroParams);
+        }
+    }, 50);
+}
+
+// === BLE CONNECTION ===
+async function connectBLE() {
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+        }
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+
+        document.getElementById('btn-conn').innerText = "SCANNING...";
+        
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
+        });
+        
+        document.getElementById('btn-conn').innerText = "CONNECTING...";
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        await applyStageSettings(service);
+        await initAudioWorklet();
+
+        const dataChar = await service.getCharacteristic(CHAR_UUID);
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', onData);
+        
+        document.getElementById('ui-layer').style.opacity = 0;
+        setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
+        
+        isRunning = true;
+        animateCanvas();
+    } catch(e) {
+        alert("BLE/Audio Error: " + e.message);
+        document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
+    }
+}
+
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    let tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
+    
+    while(packetBuffer.length >= 33) {
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
+        }
+        if(head === -1) { 
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); 
+            break; 
+        }
+        if(head > 0) { 
+            packetBuffer = packetBuffer.slice(head); 
+            continue; 
+        }
+        
+        processEEGSample(packetBuffer.slice(0, 33));
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+function processEEGSample(pkt) {
+    let raw = new Float32Array(8);
+    let mean = 0;
+    for(let i=0; i<8; i++) {
+        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
+        if(v & 0x800000) v -= 0x1000000;
+        raw[i] = v * UV_SCALE;
+        mean += raw[i];
+    }
+    mean /= 8.0;
+
+    let globalSig = 0, vecX = 0, vecY = 0;
+    for(let i=0; i<8; i++) {
+        let centered = raw[i] - mean;
+        globalSig += centered;
+        vecX += centered * SPATIAL_MATRIX[0][i];
+        vecY += centered * SPATIAL_MATRIX[1][i];
+    }
+    globalSig /= 8.0;
+
+    let valD = filters.delta.process(globalSig);
+    let valT = filters.theta.process(globalSig);
+    let valAx = filters.alphaX.process(vecX);
+    let valAy = filters.alphaY.process(vecY);
+    let valG = filters.gamma.process(globalSig);
+
+    neuroParams.deltaAmp = neuroParams.deltaAmp * 0.98 + Math.abs(valD) * 0.02 * 2.0;
+    neuroParams.thetaAmp = neuroParams.thetaAmp * 0.98 + Math.abs(valT) * 0.02 * 2.0;
+    neuroParams.alphaXAmp= neuroParams.alphaXAmp* 0.98 + Math.abs(valAx)* 0.02;
+    neuroParams.alphaYAmp= neuroParams.alphaYAmp* 0.98 + Math.abs(valAy)* 0.02;
+    neuroParams.gammaAmp = neuroParams.gammaAmp * 0.95 + Math.abs(valG) * 0.05 * 5.0;
+
+    neuroParams.deltaFreq = freqD.process(valD);
+    neuroParams.thetaFreq = freqT.process(valT);
+    neuroParams.leadX = valAx;
+    neuroParams.leadY = valAy;
+
+    let totalAlphaAmp = neuroParams.alphaXAmp + neuroParams.alphaYAmp;
+
+    spiralHistory.push({ x: valAx, y: valAy, a: totalAlphaAmp });
+    if(spiralHistory.length > 500) spiralHistory.shift();
+
+    if(Math.random() < 0.05) {
+        document.getElementById('hud-bpm').innerText = `BPM: ${(neuroParams.deltaFreq * 60).toFixed(0)}`;
+    }
 }
 
 // === CANVAS VISUALIZATION (FAST, ZOOMABLE) ===
@@ -392,7 +394,6 @@ window.addEventListener('wheel', (e) => {
     document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/50.0).toFixed(1)}`;
 }, {passive: true});
 
-// Touch zoom (Mobile pinch)
 let initialDistance = null;
 window.addEventListener('touchstart', (e) => {
     if(e.touches.length === 2) {
@@ -414,7 +415,7 @@ window.addEventListener('touchmove', (e) => {
 function animateCanvas() {
     if(!isRunning) return;
     
-    // Clear screen (No shadows for high FPS!)
+    // Clear screen
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
     ctx.fillRect(0, 0, cvs.width, cvs.height);
