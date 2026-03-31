@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neuro Psytrance Mandala</title>
+    <title>Emergent Psytrance</title>
     <style>
         body { 
-            margin: 0; background-color: #000; color: #0ff; 
-            font-family: 'Courier New', monospace; overflow: hidden; 
-            width: 100vw; height: 100vh; position: fixed; 
+            margin: 0; background: #080808; overflow: hidden; 
+            font-family: 'Courier New', monospace; color: #00ffcc;
+            touch-action: none; /* Блокируем скролл страницы для зума */
         }
-        canvas { display: block; width: 100%; height: 100%; z-index: 1; position: absolute; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
         #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -18,7 +18,7 @@
             background: rgba(0,0,0,0.85); z-index: 10; transition: opacity 0.5s;
         }
         
-        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; z-index: 11; }
         select {
             background: rgba(0, 255, 255, 0.1); color: #0ff; border: 2px solid #0ff;
             padding: 10px 20px; font-size: 18px; font-weight: bold; border-radius: 10px;
@@ -27,72 +27,66 @@
         select option { background: #000; color: #0ff; }
         
         button {
-            background: rgba(0, 255, 255, 0.1); color: #0ff; border: 2px solid #0ff;
-            padding: 20px 40px; font-size: 20px; font-weight: bold; border-radius: 50px;
-            cursor: pointer; text-transform: uppercase; box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
-            backdrop-filter: blur(5px); margin: 10px;
+            background: rgba(0, 255, 204, 0.1); color: #00ffcc;
+            border: 2px solid #00ffcc; padding: 20px 40px;
+            font-size: 18px; font-weight: bold; border-radius: 50px;
+            margin: 10px; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2); backdrop-filter: blur(5px);
         }
-        button:active { background: #0ff; color: #000; }
+        button:active { background: #00ffcc; color: #000; }
         
-        h1 { color: #fff; text-shadow: 0 0 10px #fff; margin-bottom: 30px; text-align: center; }
+        #hud {
+            position: absolute; top: 20px; left: 20px; z-index: 5;
+            font-size: 16px; font-weight: bold; text-shadow: 0 0 5px #00ffcc;
+            pointer-events: none;
+        }
+        #hud-title { font-size: 24px; margin-bottom: 10px; color: #fff; text-shadow: 0 0 10px #fff; }
     </style>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <h1>NEURO PSYTRANCE<br><span style="font-size:16px; color:#0ff;">Holographic Engine</span></h1>
-        
-        <div class="controls">
-            <label style="font-size: 18px; font-weight: bold;">ADC GAIN:</label>
-            <select id="gain-select">
-                <option value="5">32 (Max)</option>
-                <option value="4">16 (High)</option>
-                <option value="3" selected>8 (Normal)</option>
-                <option value="2">4 (Low)</option>
-            </select>
-        </div>
-
-        <button id="btn-full">1. FULLSCREEN</button>
-        <button id="btn-connect">2. CONNECT & PLAY</button>
+<div id="ui-layer">
+    <h1 style="color:white; text-shadow: 0 0 15px #fff; text-align: center;">EMERGENT PSYTRANCE</h1>
+    
+    <div class="controls">
+        <label style="font-size: 18px; font-weight: bold;">ADC GAIN:</label>
+        <select id="gain-select">
+            <option value="5">32 (Max)</option>
+            <option value="4">16 (High)</option>
+            <option value="3" selected>8 (Normal)</option>
+            <option value="2">4 (Low)</option>
+        </select>
     </div>
 
-    <canvas id="radar"></canvas>
+    <button id="btn-full">1. FULLSCREEN</button>
+    <button id="btn-conn">2. CONNECT & PLAY</button>
+</div>
+
+<div id="hud">
+    <div id="hud-title">FM LEAD RADAR</div>
+    <div id="hud-bpm">BPM: --</div>
+    <div id="hud-zoom">ZOOM: x1.0</div>
+</div>
+
+<canvas id="cvs"></canvas>
 
 <script>
-// === CONFIG ===
-const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const BLE_CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-const CMD_UUID         = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+// === CONFIG & MATH ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 
-const FS = 250;
-const CHANNELS = 8;
-const FFT_SIZE = 256; 
 let UV_SCALE = (1.2 / 8 / 8388607.0) * 1e6; // Default Gain 8
 
-// SPATIAL MATRIX (Безопасно записанная, без комментов в конце)
+// Чистая матрица без комментариев
 const SPATIAL_MATRIX = [[-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],[-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
 ];
 
-// === STATE ===
-let isConnected = false;
-let channelBuffers = Array.from({ length: CHANNELS }, () => new Float32Array(FFT_SIZE).fill(0));
-let packetBuffer = new Uint8Array(); 
-let audioCtx = null;
-let audioWorkletNode = null;
-let isRunning = false;
-
-// Нейро-параметры для передачи в синтезатор
-let neuroParams = {
-    deltaAmp: 0, deltaFreq: 2.0,
-    thetaAmp: 0, thetaFreq: 6.0,
-    alphaXAmp: 0, alphaYAmp: 0,
-    gammaAmp: 0, leadX: 0, leadY: 0
-};
-
-// === IIR FILTERS (Для быстрого расчета аудио-параметров) ===
+// === DSP FILTERS ===
 class Biquad {
     constructor(b0, b1, b2, a1, a2) {
-        this.b =[b0, b1, b2]; this.a = [1, a1, a2];
+        this.b = [b0, b1, b2];
+        this.a =[1, a1, a2];
         this.z1 = 0; this.z2 = 0;
     }
     process(x) {
@@ -102,6 +96,26 @@ class Biquad {
         return out;
     }
 }
+
+class FreqEstimator {
+    constructor(minF, maxF, defaultF) {
+        this.samples = 0; this.prev = 0; this.freq = defaultF;
+        this.minF = minF; this.maxF = maxF;
+    }
+    process(val) {
+        this.samples++;
+        if (val > 0 && this.prev <= 0) {
+            let f = 250.0 / this.samples;
+            if (f >= this.minF && f <= this.maxF) {
+                this.freq = this.freq * 0.9 + f * 0.1;
+            }
+            this.samples = 0;
+        }
+        this.prev = val;
+        return this.freq;
+    }
+}
+
 const filters = {
     delta: new Biquad(0.007, 0, -0.007, -1.98, 0.985),
     theta: new Biquad(0.017, 0, -0.017, -1.96, 0.965),
@@ -110,12 +124,36 @@ const filters = {
     gamma: new Biquad(0.100, 0, -0.100, -1.17, 0.80)
 };
 
-// === AUDIO SYNTHESIS (ОБХОД БЛОКИРОВКИ FILE:// ЧЕРЕЗ BASE64) ===
+const freqD = new FreqEstimator(1.0, 4.0, 2.0);
+const freqT = new FreqEstimator(4.0, 8.0, 6.0);
+
+// === STATE ===
+let isRunning = false;
+let packetBuffer = new Uint8Array();
+let spiralHistory =[];
+let audioCtx = null;
+let audioWorkletNode = null;
+let viewZoom = 50.0; 
+
+let neuroParams = {
+    deltaAmp: 0, deltaFreq: 2.0,
+    thetaAmp: 0, thetaFreq: 6.0,
+    alphaXAmp: 0, alphaYAmp: 0,
+    gammaAmp: 0, leadX: 0, leadY: 0
+};
+
+// === AUDIO WORKLET (Psytrance Synth) ===
 async function initAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+    }
+    if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+    }
 
     const workletCode = `
+        const clip = (val, min, max) => Math.max(min, Math.min(val, max));
+
         class PsytranceProcessor extends AudioWorkletProcessor {
             constructor() {
                 super();
@@ -124,8 +162,10 @@ async function initAudio() {
                 this.delayBuf =[new Float32Array(88200), new Float32Array(88200)]; 
                 this.delayPtr = 0;
                 this.np = { deltaAmp:0, deltaFreq:2, thetaAmp:0, thetaFreq:6, alphaXAmp:0, alphaYAmp:0, gammaAmp:0, leadX:0, leadY:0 };
+                
                 this.port.onmessage = (e) => { this.np = e.data; };
             }
+
             process(inputs, outputs) {
                 if(!outputs[0] || !outputs[0][0]) return true;
                 const outL = outputs[0][0]; 
@@ -133,8 +173,8 @@ async function initAudio() {
                 const dt = 1.0 / sampleRate;
                 const np = this.np;
 
-                let fd = Math.max(1.0, Math.min(np.deltaFreq, 4.0));
-                let ft = Math.max(3.0, Math.min(np.thetaFreq, 12.0));
+                let fd = clip(np.deltaFreq, 1.0, 4.0);
+                let ft = clip(np.thetaFreq, 3.0, 12.0);
 
                 for (let i = 0; i < outL.length; i++) {
                     let mixL = 0, mixR = 0;
@@ -150,7 +190,7 @@ async function initAudio() {
                         let env = Math.exp(-T * 10.0);
                         let pitch = 40 + 150 * Math.exp(-T * 20.0);
                         let wave = Math.sin(6.2832 * (48*T - 3.5*Math.exp(-55*T)));
-                        let amp = Math.max(0.5, Math.min(np.deltaAmp*2.2, 1.6));
+                        let amp = clip(np.deltaAmp*2.2, 0.6, 1.6);
                         mixL += wave * env * amp * 1.4;
                         this.timers.kick += dt;
                     }
@@ -158,7 +198,7 @@ async function initAudio() {
                     // BASS
                     let b_raw = 2.0 * (this.p.t - 0.5);
                     let b_env = Math.exp(-this.p.t * 8.0);
-                    let tAmp = Math.max(0.2, Math.min(np.thetaAmp*1.5, 0.8));
+                    let tAmp = clip(np.thetaAmp*1.5, 0.2, 0.8);
                     mixL += Math.tanh(b_raw * b_env * (2.2 + np.thetaAmp*5)) * tAmp * 1.15;
 
                     // FM LEAD
@@ -171,13 +211,13 @@ async function initAudio() {
                     
                     let lead_wave = Math.sin(6.2832 * this.p.fm_c + m_index * Math.sin(6.2832 * this.p.fm_m));
                     let lead_env = Math.exp(-((this.p.t * 2) % 1.0) * 5.0);
-                    let lead_vol = Math.max(0.0, Math.min((np.alphaXAmp - 0.06)*6.0, 0.72));
+                    let lead_vol = clip((np.alphaXAmp - 0.06)*6, 0, 0.72);
                     mixR += lead_wave * lead_env * lead_vol * 0.58;
 
                     // HATS
                     let noise = Math.random() * 2 - 1;
                     let hat_env = Math.exp(-((this.p.t * 4) % 1.0) * 20.0);
-                    let gAmp = Math.max(0.0, Math.min(np.gammaAmp*2.0, 0.5));
+                    let gAmp = clip(np.gammaAmp*2.0, 0, 0.5);
                     let hats = noise * hat_env * gAmp * 0.65;
                     mixL += hats; mixR += hats;
 
@@ -185,11 +225,11 @@ async function initAudio() {
                     mixL = Math.tanh(mixL * 2.2) * 0.0018;
                     mixR = Math.tanh(mixR * 2.2) * 0.0018;
                     
-                    let drive = Math.max(0.0, Math.min(np.gammaAmp * 1.8, 1.0));
+                    let drive = clip(np.gammaAmp * 1.8, 0, 1.0);
                     mixL = Math.tanh(mixL * (1.0 + drive * 2.5));
                     mixR = Math.tanh(mixR * (1.0 + drive * 2.5));
 
-                    let d_mix = Math.max(0.1, Math.min(0.6 - np.gammaAmp + np.alphaXAmp, 0.8));
+                    let d_mix = clip(0.6 - np.gammaAmp + np.alphaXAmp, 0.1, 0.8);
                     let d_samp = Math.floor(0.28 * sampleRate);
                     let didx = (this.delayPtr - d_samp + this.delayBuf[0].length) % this.delayBuf[0].length;
                     let eL = this.delayBuf[0][didx];
@@ -199,7 +239,7 @@ async function initAudio() {
                     this.delayBuf[1][this.delayPtr] = mixR + eL * 0.55;
                     this.delayPtr = (this.delayPtr + 1) % this.delayBuf[0].length;
 
-                    // Громкость х3.0 для хорошей слышимости в браузере
+                    // Усиление на выходе для браузера
                     outL[i] = Math.tanh(mixL + eL * d_mix) * 3.0; 
                     outR[i] = Math.tanh(mixR + eR * d_mix) * 3.0;
                 }
@@ -209,118 +249,130 @@ async function initAudio() {
         registerProcessor('psy-synth', PsytranceProcessor);
     `;
 
-    // Создаем Base64 URI, чтобы обойти блокировку CORS на file:///
-    const base64Code = btoa(unescape(encodeURIComponent(workletCode)));
-    const workletURL = 'data:application/javascript;base64,' + base64Code;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletURL = URL.createObjectURL(blob);
     
     await audioCtx.audioWorklet.addModule(workletURL);
     audioWorkletNode = new AudioWorkletNode(audioCtx, 'psy-synth');
     audioWorkletNode.connect(audioCtx.destination);
     
     setInterval(() => {
-        if(isRunning && audioWorkletNode) audioWorkletNode.port.postMessage(neuroParams);
+        if(isRunning && audioWorkletNode) {
+            audioWorkletNode.port.postMessage(neuroParams);
+        }
     }, 50);
 }
 
-// === BLE HANDLER & DEVICE SETUP ===
-async function applyStageSettings(cmdChar, pga) {
-    const stage = 4;
-    const presets = { 4: [7, pga, 0, 0x000F] }; // ИСПОЛЬЗУЕМ ВЫБРАННЫЙ GAIN
-    const [sps, gain, mux, dc] = presets[stage];
+// === BLE CONFIGURATION ===
+async function applyStageSettings(service, pga) {
+    try {
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        const stage = 4;
+        const presets = { 4:[7, pga, 0, 0x000F] };
+        const[sps, gain, mux, dc] = presets[stage];
 
-    async function writeReg(addr, val, mask=null) {
-        let cmd = mask ? new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
-        await cmdChar.writeValueWithoutResponse(cmd);
-        await new Promise(r => setTimeout(r, 150));
+        async function writeReg(addr, val, mask=null) {
+            let cmd = mask ? new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
+            await cmdChar.writeValueWithoutResponse(cmd);
+            await new Promise(r => setTimeout(r, 150));
+        }
+
+        console.log("Setting up device...");
+        await writeReg(0x08, dc, 0x000F);
+        await writeReg(0x03, sps << 2, 0x001C);
+        
+        let pga_val = (gain<<12)|(gain<<8)|(gain<<4)|gain;
+        await writeReg(0x04, pga_val);
+        await writeReg(0x05, pga_val);
+        
+        for (let i = 0; i < 8; i++) {
+            await writeReg(0x09 + i*5, mux, 0x0003);
+        }
+
+        const gains =[1, 1, 4, 8, 16, 32];
+        const gain_real = gains[gain];
+        UV_SCALE = (1.2 / gain_real / 8388607.0) * 1e6;
+        console.log("Device configured successfully. Gain:", gain_real);
+
+    } catch (err) {
+        console.error("Config error: ", err);
     }
-
-    await writeReg(0x08, dc, 0x000F); // DC Block
-    await writeReg(0x03, sps << 2, 0x001C); // SPS
-    
-    let pga_val = (gain<<12)|(gain<<8)|(gain<<4)|gain;
-    await writeReg(0x04, pga_val); // PGA1
-    await writeReg(0x05, pga_val); // PGA2
-    
-    for (let i = 0; i < 8; i++) await writeReg(0x09 + i*5, mux, 0x0003); // MUX
-
-    const gain_real =[1, 1, 4, 8, 16, 32][gain];
-    UV_SCALE = (1.2 / gain_real / 8388607.0) * 1e6;
-    console.log("Device configured. Gain:", gain_real);
 }
 
-async function connectBLE() {
+// === BLE CONNECTION ===
+document.getElementById('btn-conn').onclick = async () => {
     try {
-        await initAudio(); // Обязательно в обработчике клика
+        // 1. Инициализируем аудио СРАЗУ по клику (требование браузеров)
+        await initAudio();
         
-        const btn = document.getElementById('btn-connect');
-        btn.innerText = "SCANNING...";
+        document.getElementById('btn-conn').innerText = "SCANNING...";
         
+        // 2. Ищем устройство
         const device = await navigator.bluetooth.requestDevice({
-            filters:[{ services: [BLE_SERVICE_UUID] }]
+            filters: [{ services:[SERVICE_UUID] }]
         });
-
-        btn.innerText = "CONNECTING...";
-        const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         
-        // Отправляем настройки
-        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        document.getElementById('btn-conn').innerText = "CONNECTING...";
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        // 3. Применяем настройки АЦП (Gain из выпадающего списка)
         const selectedGain = parseInt(document.getElementById('gain-select').value);
-        await applyStageSettings(cmdChar, selectedGain);
+        await applyStageSettings(service, selectedGain);
 
-        const dataChar = await service.getCharacteristic(BLE_CHAR_UUID);
+        // 4. Подписываемся на данные
+        const dataChar = await service.getCharacteristic(CHAR_UUID);
         await dataChar.startNotifications();
-        dataChar.addEventListener('characteristicvaluechanged', onDataReceived);
-
+        dataChar.addEventListener('characteristicvaluechanged', onData);
+        
+        // Прячем UI
         document.getElementById('ui-layer').style.opacity = 0;
-        document.getElementById('ui-layer').style.pointerEvents = 'none';
+        setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
         
         isRunning = true;
-        requestAnimationFrame(processLoop);
-
-    } catch (error) {
-        alert("Connection Error: " + error.message);
-        document.getElementById('btn-connect').innerText = "CONNECT BLE";
+        animateCanvas(); // Запускаем отрисовку
+    } catch(e) {
+        alert("Error: " + e.message);
+        document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
     }
-}
+};
 
-function onDataReceived(event) {
-    const value = new Uint8Array(event.target.value.buffer);
-    const temp = new Uint8Array(packetBuffer.length + value.length);
-    temp.set(packetBuffer); temp.set(value, packetBuffer.length);
-    packetBuffer = temp;
-
-    while (packetBuffer.length >= 33) {
-        let found = false;
-        for (let i = 0; i < packetBuffer.length - 32; i++) {
-            if (packetBuffer[i] === 0xA0 && packetBuffer[i+32] === 0xC0) {
-                parsePacket(packetBuffer.slice(i, i+33));
-                packetBuffer = packetBuffer.slice(i + 33);
-                found = true; break; 
-            }
+function onData(e) {
+    const val = new Uint8Array(e.target.value.buffer);
+    let tmp = new Uint8Array(packetBuffer.length + val.length);
+    tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
+    packetBuffer = tmp;
+    
+    while(packetBuffer.length >= 33) {
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
         }
-        if (!found) {
-            if (packetBuffer.length > 100) packetBuffer = packetBuffer.slice(-32);
-            break;
+        if(head === -1) { 
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); 
+            break; 
         }
-    }
-}
-
-function parsePacket(pkt) {
-    let mean = 0, raw = new Float32Array(8);
-    for (let i = 0; i < CHANNELS; i++) {
-        let val = (pkt[2 + i*3] << 16) | (pkt[3 + i*3] << 8) | pkt[4 + i*3];
-        if ((val & 0x800000) > 0) val = val - 0x1000000;
-        raw[i] = val * UV_SCALE;
-        mean += raw[i];
+        if(head > 0) { 
+            packetBuffer = packetBuffer.slice(head); 
+            continue; 
+        }
         
-        // Для FFT Визуализации
-        channelBuffers[i].set(channelBuffers[i].subarray(1));
-        channelBuffers[i][FFT_SIZE-1] = raw[i];
+        processEEGSample(packetBuffer.slice(0, 33));
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+function processEEGSample(pkt) {
+    let raw = new Float32Array(8);
+    let mean = 0;
+    for(let i=0; i<8; i++) {
+        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
+        if(v & 0x800000) v -= 0x1000000;
+        raw[i] = v * UV_SCALE;
+        mean += raw[i];
     }
     mean /= 8.0;
 
-    // Для Синтезатора (IIR фильтры)
     let globalSig = 0, vecX = 0, vecY = 0;
     for(let i=0; i<8; i++) {
         let centered = raw[i] - mean;
@@ -341,97 +393,102 @@ function parsePacket(pkt) {
     neuroParams.alphaXAmp= neuroParams.alphaXAmp* 0.98 + Math.abs(valAx)* 0.02;
     neuroParams.alphaYAmp= neuroParams.alphaYAmp* 0.98 + Math.abs(valAy)* 0.02;
     neuroParams.gammaAmp = neuroParams.gammaAmp * 0.95 + Math.abs(valG) * 0.05 * 5.0;
+
+    neuroParams.deltaFreq = freqD.process(valD);
+    neuroParams.thetaFreq = freqT.process(valT);
+    neuroParams.leadX = valAx;
+    neuroParams.leadY = valAy;
+
+    let totalAlphaAmp = neuroParams.alphaXAmp + neuroParams.alphaYAmp;
+
+    // Сохраняем историю для отрисовки (ограничиваем длину, чтобы не тормозило)
+    spiralHistory.push({ x: valAx, y: valAy, a: totalAlphaAmp });
+    if(spiralHistory.length > 200) spiralHistory.shift();
+
+    if(Math.random() < 0.05) {
+        document.getElementById('hud-bpm').innerText = `BPM: ${(neuroParams.deltaFreq * 60).toFixed(0)}`;
+    }
 }
 
-// === CANVAS & VISUALIZATION (Твоя любимая матрица из Holographic_Phase_Map) ===
-const canvas = document.getElementById('radar');
-const ctx = canvas.getContext('2d');
-let w, h, cx, cy, rad;
+// === CANVAS VISUALIZATION (FAST, ZOOMABLE) ===
+const cvs = document.getElementById('cvs');
+const ctx = cvs.getContext('2d', {alpha: false});
+let cx, cy;
 
 function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    w = canvas.width; h = canvas.height;
-    cx = w / 2; cy = h / 2;
-    rad = Math.min(cx, cy) * 0.9; 
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    cx = cvs.width / 2; cy = cvs.height / 2;
 }
-window.addEventListener('resize', resize);
-resize();
+window.onresize = resize; resize();
 
-function computeFFT(inData) {
-    const N = inData.length;
-    const mags = new Float32Array(N/2);
-    const phases = new Float32Array(N/2);
-    const win = new Float32Array(N);
-    for(let i=0;i<N;i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(N-1)));
+// Zoom handling (Mouse Wheel)
+window.addEventListener('wheel', (e) => {
+    viewZoom -= e.deltaY * 0.1;
+    if (viewZoom < 5.0) viewZoom = 5.0;
+    if (viewZoom > 2000.0) viewZoom = 2000.0;
+    document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/50.0).toFixed(1)}`;
+}, {passive: true});
 
-    for (let k=0; k<N/2; k++) {
-        let re=0, im=0;
-        for (let n=0; n<N; n++) {
-            const phi = (2*Math.PI*k*n)/N;
-            re += inData[n]*win[n]*Math.cos(phi);
-            im -= inData[n]*win[n]*Math.sin(phi);
-        }
-        mags[k] = Math.sqrt(re*re + im*im);
-        phases[k] = Math.atan2(im, re);
+// Zoom handling (Touch Pinch)
+let initialDistance = null;
+window.addEventListener('touchstart', (e) => {
+    if(e.touches.length === 2) {
+        initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
     }
-    return { mags, phases };
-}
-
-function processLoop() {
-    if (!isConnected) { requestAnimationFrame(processLoop); return; }
-
-    const signal = new Float32Array(FFT_SIZE);
-    for (let i = 0; i < FFT_SIZE; i++) {
-        let sum = 0;
-        for(let ch=0; ch<CHANNELS; ch++) sum += channelBuffers[ch][i];
-        signal[i] = sum / CHANNELS;
+});
+window.addEventListener('touchmove', (e) => {
+    if(e.touches.length === 2 && initialDistance !== null) {
+        let currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        let delta = currentDistance - initialDistance;
+        viewZoom += delta * 0.5;
+        if (viewZoom < 5.0) viewZoom = 5.0;
+        if (viewZoom > 2000.0) viewZoom = 2000.0;
+        initialDistance = currentDistance;
+        document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/50.0).toFixed(1)}`;
     }
+});
 
-    const { mags, phases } = computeFFT(signal);
-
-    // Отрисовка фона и сетки (Хвосты частиц)
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
-    ctx.fillRect(0, 0, w, h);
+function animateCanvas() {
+    if(!isRunning) return;
     
-    ctx.strokeStyle = '#003300';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rad*0.25, 0, Math.PI*2);
-    ctx.arc(cx, cy, rad*0.5, 0, Math.PI*2);
-    ctx.arc(cx, cy, rad*1.0, 0, Math.PI*2);
-    ctx.stroke();
-
-    // Отрисовка частиц (Идеальная физика из твоего оригинала)
-    for (let i = 2; i < mags.length; i++) {
-        const f = i * (FS / FFT_SIZE);
-        if (f > 60) break;
-
-        const amp = mags[i];
-        const angle = phases[i];
-        const dist = (f / 60.0) * rad;
-        const x = cx + Math.cos(angle) * dist;
-        const y = cy + Math.sin(angle) * dist;
-
-        const size = 3 + Math.min(15, amp); 
-        const opacity = 0.4 + Math.min(0.6, amp / 5.0);
-        const hue = 240 - (f * 4); 
+    // Быстрая очистка экрана (без теней)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    
+    ctx.globalCompositeOperation = 'lighter';
+    
+    if(spiralHistory.length > 2) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
-        ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${opacity})`;
+        // Рисуем всю спираль одним путем (очень быстро)
         ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI*2);
+        ctx.moveTo(cx + spiralHistory[0].x * viewZoom, cy + spiralHistory[0].y * viewZoom);
+        
+        for(let i=1; i<spiralHistory.length; i++) {
+            const p = spiralHistory[i];
+            ctx.lineTo(cx + p.x * viewZoom, cy + p.y * viewZoom);
+        }
+        ctx.strokeStyle = `rgba(0, 255, 204, 0.8)`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Яркая точка на конце (текущее положение)
+        const last = spiralHistory[spiralHistory.length-1];
+        ctx.beginPath();
+        ctx.arc(cx + last.x * viewZoom, cy + last.y * viewZoom, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#fff';
         ctx.fill();
     }
-
-    requestAnimationFrame(processLoop);
+    
+    requestAnimationFrame(animateCanvas);
 }
 
-// UI Handlers
-document.getElementById('btn-full').onclick = () => {
-    document.documentElement.requestFullscreen();
-    setTimeout(resize, 500); 
+// === UI BINDINGS ===
+document.getElementById('btn-full').onclick = () => { 
+    if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); 
 };
-document.getElementById('btn-connect').onclick = connectBLE;
 
 </script>
 </body>
