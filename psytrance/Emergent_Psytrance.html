@@ -8,7 +8,7 @@
         body { 
             margin: 0; background: #080808; overflow: hidden; 
             font-family: 'Courier New', monospace; color: #00ffcc;
-            touch-action: none; /* Блокируем скролл страницы для зума на мобильных */
+            touch-action: none; /* Блокируем скролл для работы зума */
         }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
@@ -80,17 +80,16 @@ const CHAR_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 
 const EEG_FS = 250;
-const BUF_SIZE = 1024; // 4.096 сек (оптимально для FFT)
+const BUF_SIZE = 1024; // 4 сек
 
 let UV_SCALE = (1.2 / 8 / 8388607.0) * 1e6;
 
-// Матрица для круга 10мм
 const SPATIAL_MATRIX = [
     [-0.01353, -0.00378, -0.00378, -0.01353, -0.02619, -0.03623, -0.03623, -0.02619],
     [-0.02752, -0.01700,  0.01700,  0.02752,  0.02752,  0.01700, -0.01700, -0.02752]
 ];
 
-// === FAST FFT (Точный аналог torch.fft) ===
+// === FAST FFT ===
 function reverseBits(x, n) {
     let res = 0;
     for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
@@ -134,14 +133,13 @@ function extractBandFeatures(signal, low, high) {
         let freq = i * (EEG_FS / BUF_SIZE);
         if (i > BUF_SIZE/2) freq = (BUF_SIZE - i) * (EEG_FS / BUF_SIZE);
         let mask = (freq >= low && freq <= high && i <= BUF_SIZE/2) ? 1 : 0;
-        if (mask) { re[i] *= 2.0; im[i] *= 2.0; } 
-        else { re[i] = 0; im[i] = 0; }
+        if (mask) { re[i] *= 2.0; im[i] *= 2.0; } else { re[i] = 0; im[i] = 0; }
     }
     ifft(re, im);
 
     let meanAmp = 0, meanFreq = 0;
     let lastPhase = 0;
-    let windowLen = 125; // 0.5 sec
+    let windowLen = 125; // Усредняем за последние 0.5 сек
 
     for(let i = BUF_SIZE - windowLen; i < BUF_SIZE; i++) {
         let amp = Math.sqrt(re[i]*re[i] + im[i]*im[i]);
@@ -167,7 +165,7 @@ let audioCtx = null;
 let audioWorkletNode = null;
 
 // Переменные для визуализации
-let viewZoom = 200.0;
+let viewZoom = 300.0;
 let render_phase_x = 0;
 let render_phase_y = 0;
 let spiralHistory = [];
@@ -179,7 +177,7 @@ let neuroParams = {
     gammaAmp: 0
 };
 
-// === AUDIO WORKLET (Чистый Psytrance) ===
+// === AUDIO WORKLET (Синтезатор) ===
 async function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
     if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -211,8 +209,7 @@ async function initAudio() {
                 const dt = 1.0 / sampleRate;
 
                 for (let i = 0; i < outL.length; i++) {
-                    // Плавная интерполяция параметров (anti-zipper noise)
-                    let smooth = 0.0005;
+                    let smooth = 0.0005; // Сглаживание параметров ЭЭГ
                     this.sm.f_d += smooth * (this.target.deltaFreq - this.sm.f_d);
                     this.sm.a_d += smooth * (this.target.deltaAmp - this.sm.a_d);
                     this.sm.f_t += smooth * (this.target.thetaFreq - this.sm.f_t);
@@ -284,29 +281,38 @@ async function initAudio() {
     audioWorkletNode.connect(audioCtx.destination);
 }
 
-// === BLE CONFIGURATION ===
+// === BLE CONNECTION ===
 async function applyStageSettings(service, pga) {
     try {
         const cmdChar = await service.getCharacteristic(CMD_UUID);
+        
         async function writeReg(addr, val, mask=null) {
             let cmd = mask ? new Uint8Array([addr, (val>>8)&0xFF, val&0xFF, (mask>>8)&0xFF, mask&0xFF]) : new Uint8Array([addr, (val>>8)&0xFF, val&0xFF]);
             await cmdChar.writeValueWithoutResponse(cmd);
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 150));
         }
 
+        console.log("Setting up device...");
         await writeReg(0x08, 0x000F, 0x000F); // DC Block
-        await writeReg(0x03, 5 << 2, 0x001C); // 250 SPS
+        await writeReg(0x03, 7 << 2, 0x001C); // 250 SPS (ИСПОЛЬЗУЕМ 7, ЧТОБЫ НЕ ПАДАЛ BLUETOOTH)
         
         let pga_val = (pga<<12)|(pga<<8)|(pga<<4)|pga;
-        await writeReg(0x04, pga_val); await writeReg(0x05, pga_val);
-        for (let i = 0; i < 8; i++) await writeReg(0x09 + i*5, 0, 0x0003);
+        await writeReg(0x04, pga_val);
+        await writeReg(0x05, pga_val);
+        
+        for (let i = 0; i < 8; i++) {
+            await writeReg(0x09 + i*5, 0, 0x0003); // MUX 0
+        }
 
-        const gains = {5:32, 4:16, 3:8, 2:4, 7:128};
+        const gains = {0:1, 1:2, 2:4, 3:8, 4:16, 5:32, 6:64, 7:128};
         UV_SCALE = (1.2 / gains[pga] / 8388607.0) * 1e6;
-    } catch (err) { console.error("Config error:", err); }
+        console.log("Device configured successfully. Gain:", gains[pga]);
+
+    } catch (err) {
+        console.error("Config error: ", err);
+    }
 }
 
-// === BLE CONNECTION ===
 document.getElementById('btn-conn').onclick = async () => {
     try {
         await initAudio();
@@ -329,8 +335,7 @@ document.getElementById('btn-conn').onclick = async () => {
         setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
         
         isRunning = true;
-        lastRenderTime = performance.now();
-        animateCanvas();
+        requestAnimationFrame(animateCanvas);
     } catch(e) {
         alert("Error: " + e.message);
         document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
@@ -343,36 +348,54 @@ function onData(e) {
     tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
     packetBuffer = tmp;
     
+    // Оригинальный сверхнадежный парсер пакетов
     while(packetBuffer.length >= 33) {
-        let head = packetBuffer.findIndex((v, i) => v === 0xA0 && packetBuffer[i+32] === 0xC0);
-        if(head === -1) { if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); break; }
-        if(head > 0) { packetBuffer = packetBuffer.slice(head); continue; }
-        
-        let mean = 0;
-        let raw = new Float32Array(8);
-        for(let i=0; i<8; i++) {
-            let v = (packetBuffer[head+2+i*3]<<16) | (packetBuffer[head+3+i*3]<<8) | packetBuffer[head+4+i*3];
-            if(v & 0x800000) v -= 0x1000000;
-            raw[i] = v * UV_SCALE;
-            mean += raw[i];
+        let head = -1;
+        for(let i=0; i<packetBuffer.length-32; i++) {
+            if(packetBuffer[i]===0xA0 && packetBuffer[i+32]===0xC0) { head = i; break; }
         }
-        mean /= 8.0;
-
-        for(let c=0; c<8; c++) {
-            for(let i=0; i<BUF_SIZE-1; i++) eegBuffer[c][i] = eegBuffer[c][i+1];
-            eegBuffer[c][BUF_SIZE-1] = raw[c] - mean;
+        if(head === -1) { 
+            if(packetBuffer.length > 66) packetBuffer = packetBuffer.slice(-33); 
+            break; 
         }
-
-        processCounter++;
-        // Обновляем DSP каждые 10 семплов (40мс)
-        if(processCounter >= 10) { updateDSP(); processCounter = 0; }
+        if(head > 0) { 
+            packetBuffer = packetBuffer.slice(head); 
+            continue; 
+        }
         
-        packetBuffer = packetBuffer.slice(head + 33);
+        processEEGSample(packetBuffer.slice(0, 33));
+        packetBuffer = packetBuffer.slice(33);
+    }
+}
+
+function processEEGSample(pkt) {
+    let mean = 0;
+    let raw = new Float32Array(8);
+    for(let i=0; i<8; i++) {
+        let v = (pkt[2+i*3]<<16) | (pkt[3+i*3]<<8) | pkt[4+i*3];
+        if(v & 0x800000) v -= 0x1000000;
+        raw[i] = v * UV_SCALE;
+        mean += raw[i];
+    }
+    mean /= 8.0;
+
+    // Сдвиг буфера
+    for(let c=0; c<8; c++) {
+        for(let i=0; i<BUF_SIZE-1; i++) eegBuffer[c][i] = eegBuffer[c][i+1];
+        eegBuffer[c][BUF_SIZE-1] = raw[c] - mean;
+    }
+
+    processCounter++;
+    if(processCounter >= 10) { 
+        updateDSP(); 
+        processCounter = 0; 
     }
 }
 
 function updateDSP() {
-    let glob = new Float32Array(BUF_SIZE), vx = new Float32Array(BUF_SIZE), vy = new Float32Array(BUF_SIZE);
+    let glob = new Float32Array(BUF_SIZE);
+    let vx = new Float32Array(BUF_SIZE);
+    let vy = new Float32Array(BUF_SIZE);
 
     for(let i=0; i<BUF_SIZE; i++) {
         let sum = 0, x = 0, y = 0;
@@ -443,32 +466,31 @@ function resize() {
 }
 window.onresize = resize; resize();
 
-let lastRenderTime = 0;
+let lastRenderTime = performance.now();
 
 function animateCanvas(time) {
     if(!isRunning) return;
     
-    // Вычисляем дельту времени (dt)
+    // Вычисляем дельту времени
     let dt = (time - lastRenderTime) / 1000.0;
     lastRenderTime = time;
-    if(dt > 0.1 || isNaN(dt)) dt = 0.016; // Защита от скачков
+    if(dt > 0.1 || isNaN(dt)) dt = 0.016; 
     
-    // Интегрируем фазу с реальной частотой Альфа ритма мозга (8-13Hz)
+    // Вращаем фазу спирали с частотой реального Альфа-ритма
     render_phase_x += neuroParams.alphaXFreq * dt * Math.PI * 2;
     render_phase_y += neuroParams.alphaYFreq * dt * Math.PI * 2;
     
-    // Формируем фигуру Лиссажу
     let x = neuroParams.alphaXAmp * Math.cos(render_phase_x);
     let y = neuroParams.alphaYAmp * Math.sin(render_phase_y);
     
     spiralHistory.push({ x, y });
-    if(spiralHistory.length > 250) spiralHistory.shift(); // Длина следа
+    if(spiralHistory.length > 250) spiralHistory.shift();
     
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(8, 8, 8, 0.15)'; // Эффект затухания шлейфа
+    ctx.fillStyle = 'rgba(8, 8, 8, 0.15)'; // Motion blur
     ctx.fillRect(0, 0, cvs.width, cvs.height);
-    ctx.globalCompositeOperation = 'lighter';
     
+    ctx.globalCompositeOperation = 'lighter';
     if(spiralHistory.length > 2) {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -482,7 +504,7 @@ function animateCanvas(time) {
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Рисуем головку "кометы"
+        // Рисуем точку впереди
         const last = spiralHistory[spiralHistory.length-1];
         ctx.beginPath();
         ctx.arc(cx + last.x * viewZoom, cy + last.y * viewZoom, 4, 0, Math.PI*2);
