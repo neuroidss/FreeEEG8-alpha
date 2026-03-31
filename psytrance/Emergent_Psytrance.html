@@ -64,7 +64,7 @@
 </div>
 
 <div id="hud">
-    <div id="hud-title">FM LEAD RADAR</div>
+    <div id="hud-title">SPATIAL RADAR</div>
     <div id="hud-zoom" style="color:#fff;">ZOOM: x1.0</div>
     <div id="hud-bpm">TEMPO: -- BPM</div>
     <div id="hud-bass">BASS: -- Hz</div>
@@ -176,17 +176,19 @@ let audioCtx = null;
 let audioWorkletNode = null;
 
 // Переменные визуализации
-let viewZoom = 30.0; // Стартовый зум
-let spiralHistory = []; // Массив X,Y для линии
+let viewZoom = 150.0; // Стартовый зум
+let render_phase_x = 0;
+let render_phase_y = 0;
+let spiralHistory = []; 
 
 let neuroParams = {
     deltaFreq: 2.0, deltaAmp: 0,
     thetaFreq: 6.0, thetaAmp: 0,
-    alphaXAmp: 0, alphaYAmp: 0,
+    alphaXAmp: 0, alphaYAmp: 0, alphaXFreq: 10, alphaYFreq: 10,
     gammaAmp: 0
 };
 
-// === AUDIO WORKLET (Синтезатор без щелчков) ===
+// === AUDIO WORKLET (Идеальный микс и отсутствие щелчков) ===
 async function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
     if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -194,7 +196,6 @@ async function initAudio() {
     const workletCode = `
         const clip = (val, min, max) => Math.max(min, Math.min(val, max));
 
-        // Безопасный Гауссовский шум (защита от NaN)
         function gaussianNoise() {
             let u = Math.max(1e-10, Math.random());
             let v = Math.random();
@@ -204,7 +205,7 @@ async function initAudio() {
         class PsytranceProcessor extends AudioWorkletProcessor {
             constructor() {
                 super();
-                // Используем непрерывные таймеры времени, как в Python
+                // Непрерывные таймеры
                 this.timer_kick = 10.0;
                 this.timer_bass = 10.0;
                 
@@ -228,7 +229,7 @@ async function initAudio() {
                 const dt = 1.0 / sampleRate;
 
                 for (let i = 0; i < outL.length; i++) {
-                    // Плавное сглаживание параметров для устранения щелчков
+                    // Плавное сглаживание параметров ЭЭГ
                     let smooth = 0.0005;
                     this.sm.f_d += smooth * (this.target.deltaFreq - this.sm.f_d);
                     this.sm.a_d += smooth * (this.target.deltaAmp - this.sm.a_d);
@@ -241,31 +242,30 @@ async function initAudio() {
                     let fd = clip(this.sm.f_d, 1.0, 4.0);
                     let ft = clip(this.sm.f_t, 3.0, 12.0);
 
-                    // Фазовые триггеры для ритма
+                    // Триггеры
                     let phaseD = (this.last_d + fd * dt) % 1.0;
-                    if (phaseD < this.last_d) this.timer_kick = 0; // Trigger!
+                    if (phaseD < this.last_d) this.timer_kick = 0;
                     this.last_d = phaseD;
 
                     let phaseT = (this.last_t + ft * dt) % 1.0;
-                    if (phaseT < this.last_t) this.timer_bass = 0; // Trigger!
+                    if (phaseT < this.last_t) this.timer_bass = 0;
                     this.last_t = phaseT;
 
-                    let mixL = 0, mixR = 0;
+                    let kick = 0, bass = 0;
 
                     // KICK (Интегрирование времени дает чистый звук без треска)
                     if (this.timer_kick < 0.38) {
                         let Tk = this.timer_kick;
-                        let kick = Math.sin(2.0 * Math.PI * (48 * Tk - 3.5 * Math.exp(-55 * Tk))) * Math.exp(-16.0 * Tk);
-                        mixL += kick * clip(this.sm.a_d * 2.2, 0.6, 1.6) * 1.4;
+                        let kick_wave = Math.sin(2.0 * Math.PI * (48.0 * Tk - 3.5 * Math.exp(-55.0 * Tk))) * Math.exp(-10.0 * Tk);
+                        kick = kick_wave * clip(this.sm.a_d * 2.2, 0.6, 1.6) * 1.4;
                     }
                     this.timer_kick += dt;
 
-                    // BASS (Аналогично через непрерывный таймер)
+                    // BASS
                     if (this.timer_bass < 0.48) {
                         let Tb = this.timer_bass;
                         let bass_osc = 2.0 * ((Tb % 1.0) - 0.5) * Math.exp(-13.0 * Tb);
-                        let bass = Math.tanh(bass_osc * (2.2 + this.sm.a_t * 5.0));
-                        mixL += bass * clip(this.sm.a_t * 1.9, 0.35, 1.0) * 1.15;
+                        bass = Math.tanh(bass_osc * (2.2 + this.sm.a_t * 5.0)) * clip(this.sm.a_t * 1.9, 0.35, 1.0) * 1.15;
                     }
                     this.timer_bass += dt;
 
@@ -285,31 +285,29 @@ async function initAudio() {
                     let hat_env = Math.exp(-((phaseT * 4.0) % 1.0) * 20.0);
                     let hats = gaussianNoise() * hat_env * clip(this.sm.a_g * 2.0, 0.0, 0.5);
 
-                    // MIX & DELAY
-                    let delay_mix = clip(0.6 - this.sm.a_g + this.sm.a_ax, 0.1, 0.8);
-                    
-                    mixL += hats;
-                    mixR += lead + hats;
+                    // MIXING (Бочка и бас идут в ОБА канала)
+                    let mixL = kick + bass + lead * 0.8 + hats;
+                    let mixR = kick + bass + lead * 0.2 + hats;
 
+                    // MASTER DRIVE
+                    let drive = clip(this.sm.a_g * 1.8, 0, 1.0);
+                    mixL = Math.tanh(mixL * (1.0 + drive * 1.5));
+                    mixR = Math.tanh(mixR * (1.0 + drive * 1.5));
+
+                    // DELAY
+                    let delay_mix = clip(0.6 - this.sm.a_g + this.sm.a_ax, 0.1, 0.8);
                     let d_samp = Math.floor(0.28 * sampleRate);
                     let didx = (this.delayPtr - d_samp + this.delayBuf[0].length) % this.delayBuf[0].length;
-                    let eL = this.delayBuf[0][didx], eR = this.delayBuf[1][didx];
-
-                    // Запись в дилей (с фидбеком)
-                    mixL = Math.tanh(mixL * 2.2) * 0.0018;
-                    mixR = Math.tanh(mixR * 2.2) * 0.0018;
-
-                    let drive = clip(this.sm.a_g * 1.8, 0, 1.0);
-                    mixL = Math.tanh(mixL * (1.0 + drive * 2.5));
-                    mixR = Math.tanh(mixR * (1.0 + drive * 2.5));
+                    let eL = this.delayBuf[0][didx];
+                    let eR = this.delayBuf[1][didx];
 
                     this.delayBuf[0][this.delayPtr] = mixL + eR * 0.55;
                     this.delayBuf[1][this.delayPtr] = mixR + eL * 0.55;
                     this.delayPtr = (this.delayPtr + 1) % this.delayBuf[0].length;
 
-                    // Выход с сатурацией
-                    outL[i] = Math.tanh(mixL + eL * delay_mix) * 3.0; 
-                    outR[i] = Math.tanh(mixR + eR * delay_mix) * 3.0;
+                    // OUTPUT (Без потери громкости)
+                    outL[i] = Math.tanh(mixL + eL * delay_mix); 
+                    outR[i] = Math.tanh(mixR + eR * delay_mix);
                 }
                 return true;
             }
@@ -336,7 +334,7 @@ async function applyStageSettings(service, pga) {
 
         console.log("Setting up device...");
         await writeReg(0x08, 0x000F, 0x000F); // DC Block
-        await writeReg(0x03, 7 << 2, 0x001C); // 250 SPS (Надежная настройка!)
+        await writeReg(0x03, 7 << 2, 0x001C); // 250 SPS
         
         let pga_val = (pga<<12)|(pga<<8)|(pga<<4)|pga;
         await writeReg(0x04, pga_val);
@@ -378,7 +376,8 @@ document.getElementById('btn-conn').onclick = async () => {
         setTimeout(() => document.getElementById('ui-layer').style.display = 'none', 500);
         
         isRunning = true;
-        requestAnimationFrame(animateCanvas);
+        lastRenderTime = performance.now();
+        animateCanvas();
     } catch(e) {
         alert("Error: " + e.message);
         document.getElementById('btn-conn').innerText = "2. CONNECT & PLAY";
@@ -391,7 +390,7 @@ function onData(e) {
     tmp.set(packetBuffer); tmp.set(val, packetBuffer.length);
     packetBuffer = tmp;
     
-    // Оригинальный парсер (никогда не ломается)
+    // Оригинальный сверхнадежный парсер пакетов
     while(packetBuffer.length >= 33) {
         let head = -1;
         for(let i=0; i<packetBuffer.length-32; i++) {
@@ -429,7 +428,6 @@ function processEEGSample(pkt) {
     }
 
     processCounter++;
-    // Обновляем DSP каждые 10 семплов (40мс - как в Python)
     if(processCounter >= 10) { 
         updateDSP(); 
         processCounter = 0; 
@@ -466,6 +464,8 @@ function updateDSP() {
         thetaAmp: isNaN(t.amp)? 0 : t.amp * 2.0,
         alphaXAmp: isNaN(ax.amp)? 0 : ax.amp,
         alphaYAmp: isNaN(ay.amp)? 0 : ay.amp,
+        alphaXFreq: isNaN(ax.freq)? 10 : ax.freq,
+        alphaYFreq: isNaN(ay.freq)? 10 : ay.freq,
         gammaAmp: isNaN(g.amp)? 0 : g.amp * 5.0
     };
 
@@ -475,7 +475,6 @@ function updateDSP() {
     for(let k=0; k<10; k++) {
         spiralHistory.push({ x: ax.wave[k], y: ay.wave[k] });
     }
-    // Ограничиваем хвост "кометы"
     if(spiralHistory.length > 250) spiralHistory.splice(0, spiralHistory.length - 250);
 
     // Обновляем текст
@@ -489,7 +488,7 @@ function updateDSP() {
 // === ZOOM LOGIC ===
 window.addEventListener('wheel', e => { 
     viewZoom -= e.deltaY * 0.1; 
-    viewZoom = Math.max(5, Math.min(viewZoom, 5000)); 
+    viewZoom = Math.max(10, Math.min(viewZoom, 5000)); 
     document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/30).toFixed(1)}`; 
 }, {passive:true});
 
@@ -501,7 +500,7 @@ window.addEventListener('touchmove', e => {
     if(e.touches.length===2 && initDist!==null) {
         let dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
         viewZoom += (dist - initDist) * 0.5; 
-        viewZoom = Math.max(5, Math.min(viewZoom, 5000)); 
+        viewZoom = Math.max(10, Math.min(viewZoom, 5000)); 
         initDist = dist;
         document.getElementById('hud-zoom').innerText = `ZOOM: x${(viewZoom/30).toFixed(1)}`;
     }
@@ -518,11 +517,28 @@ function resize() {
 }
 window.onresize = resize; resize();
 
-function animateCanvas() {
+let lastRenderTime = performance.now();
+
+function animateCanvas(time) {
     if(!isRunning) return;
     
+    // Вычисляем дельту времени
+    let dt = (time - lastRenderTime) / 1000.0;
+    lastRenderTime = time;
+    if(dt > 0.1 || isNaN(dt)) dt = 0.016; 
+    
+    // Вращаем фазу спирали с частотой реального Альфа-ритма
+    render_phase_x += neuroParams.alphaXFreq * dt * Math.PI * 2;
+    render_phase_y += neuroParams.alphaYFreq * dt * Math.PI * 2;
+    
+    let x = neuroParams.alphaXAmp * Math.cos(render_phase_x);
+    let y = neuroParams.alphaYAmp * Math.sin(render_phase_y);
+    
+    spiralHistory.push({ x, y });
+    if(spiralHistory.length > 250) spiralHistory.shift();
+    
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(8, 8, 8, 0.15)'; // Motion blur (шлейф)
+    ctx.fillStyle = 'rgba(8, 8, 8, 0.15)'; // Motion blur
     ctx.fillRect(0, 0, cvs.width, cvs.height);
     
     ctx.globalCompositeOperation = 'lighter';
@@ -530,18 +546,16 @@ function animateCanvas() {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
-        
         ctx.moveTo(cx + spiralHistory[0].x * viewZoom, cy + spiralHistory[0].y * viewZoom);
         
         for(let i=1; i<spiralHistory.length; i++) {
             ctx.lineTo(cx + spiralHistory[i].x * viewZoom, cy + spiralHistory[i].y * viewZoom);
         }
-        
         ctx.strokeStyle = `rgba(0, 255, 204, 0.8)`;
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Рисуем точку-указатель (head)
+        // Рисуем точку впереди
         const last = spiralHistory[spiralHistory.length-1];
         ctx.beginPath();
         ctx.arc(cx + last.x * viewZoom, cy + last.y * viewZoom, 4, 0, Math.PI*2);
