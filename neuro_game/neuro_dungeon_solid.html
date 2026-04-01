@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Dungeon: Python Port</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.7); padding: 10px; border: 1px solid #0f0; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 20;
+        }
+        button {
+            background: #000; color: #0f0; border: 2px solid #0f0;
+            padding: 15px 30px; font-size: 20px; font-weight: bold; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div>FLOOR: <span id="lbl-floor">1</span></div>
+    <div>Z-FOCUS: <span id="lbl-z">0.00</span></div>
+    <div id="lbl-status" style="color:#ff0;">WAITING...</div>
+</div>
+
+<div id="overlay">
+    <h1 style="color:#fff;">NEURO DUNGEON</h1>
+    <button id="btn-start">CONNECT BLE</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// === 1. КОНФИГУРАЦИЯ (Из Python) ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+// Пины 26мм
+const PINS_X = [-0.31, -0.81, 0.81, 0.31, 0.95, 0.59, -0.59, -0.95];
+const PINS_Y = [-0.95, -0.59, 0.59, 0.95, 0.31, 0.81, -0.81, -0.31];
+
+let ctrl = { x: 0, y: 0, z: 0, floor: 1, interact: false };
+let isConnected = false;
+
+// Буферы для DSP (как в Python centered = data - mean)
+const BUF_LEN = 250;
+let eegRaw = Array.from({length: 8}, () => new Float32Array(BUF_LEN));
+
+// === 2. ЦИФРОВОЙ ФИЛЬТР (Butterworth 8-25Hz) ===
+class Filter {
+    constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; }
+    process(x) {
+        // Коэффициенты для 250Hz -> 8-25Hz
+        let out = 0.046 * x - 0.046 * this.x2 + 1.79 * this.y1 - 0.82 * this.y2;
+        this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
+        return out;
+    }
+}
+const filters = Array.from({length: 8}, () => new Filter());
+
+// === 3. АУДИО (С защитой от перегрузки) ===
+class NeuroAudio {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.osc = this.ctx.createOscillator();
+        this.gain = this.ctx.createGain();
+        this.panner = this.ctx.createStereoPanner();
+        this.osc.type = 'sine';
+        this.gain.gain.value = 0;
+        this.osc.connect(this.gain);
+        this.gain.connect(this.panner);
+        this.panner.connect(this.ctx.destination);
+        this.osc.start();
+    }
+    update() {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        // Громкость только от отклонения стика
+        let r = Math.sqrt(ctrl.x**2 + ctrl.y**2);
+        let vol = Math.min(0.4, r * 0.3);
+        this.gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
+        // Панорама [-1, 1]
+        let pan = Math.max(-1, Math.min(1, ctrl.x));
+        this.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.05);
+        // Частота [100, 600]
+        let freq = 300 * Math.pow(2, ctrl.y);
+        this.osc.frequency.setTargetAtTime(Math.min(2000, freq), this.ctx.currentTime, 0.05);
+    }
+}
+let audio;
+
+// === 4. МАП ГЕНЕРАТОР ===
+class Maze {
+    constructor(size) {
+        this.size = size;
+        this.grid = Array.from({length: size}, () => Array(size).fill(1));
+        this.gen(1, 1);
+        this.grid[size-2][size-2] = 2; // Portal
+    }
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.size-1 && ny>0 && ny<this.size-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+}
+
+let maze = new Maze(11);
+let player = { x: 1.5, y: 1.5, r: 0.3 };
+const cellSize = 60;
+
+function gameLoop() {
+    if(!isConnected) return;
+
+    // --- DSP (Копия логики Python) ---
+    let intensities = filters.map(f => Math.abs(f.y1));
+    let m_val = intensities.reduce((a,b)=>a+b,0)/8;
+    let max_val = Math.max(...intensities);
+    let focus = max_val / (m_val + 0.001);
+    ctrl.z = focus;
+
+    if(focus > 1.15) {
+        let cx=0, cy=0, sum=0;
+        for(let i=0; i<8; i++){
+            cx += intensities[i] * PINS_X[i];
+            cy += intensities[i] * PINS_Y[i];
+            sum += intensities[i];
+        }
+        // SENSE = 15.0 как в пайтоне
+        ctrl.x = Math.max(-1, Math.min(1, (cx/(sum+0.001)) * 15.0));
+        ctrl.y = Math.max(-1, Math.min(1, (cy/(sum+0.001)) * 15.0));
+        ctrl.interact = (focus > 1.8);
+    } else {
+        ctrl.x *= 0.8; ctrl.y *= 0.8; ctrl.interact = false;
+    }
+
+    // --- ФИЗИКА (Копия логики Python: Sliding Axes) ---
+    let speed = 0.12;
+    let vx = ctrl.x * speed;
+    let vy = ctrl.y * speed;
+
+    const isWall = (tx, ty) => {
+        let gx = Math.floor(tx);
+        let gy = Math.floor(ty);
+        // Защита от выхода за пределы массива
+        if(gy < 0 || gy >= maze.size || gx < 0 || gx >= maze.size) return true;
+        return maze.grid[gy][gx] === 1;
+    };
+
+    // Проверка X
+    if(!isWall(player.x + vx + Math.sign(vx)*player.r, player.y)) {
+        player.x += vx;
+    }
+    // Проверка Y
+    if(!isWall(player.x, player.y + vy + Math.sign(vy)*player.r)) {
+        player.y += vy;
+    }
+
+    // --- ПОРТАЛ ---
+    let pgx = Math.floor(player.x), pgy = Math.floor(player.y);
+    if(maze.grid[pgy] && maze.grid[pgy][pgx] === 2) {
+        document.getElementById('lbl-status').innerText = "PORTAL! FOCUS NOW!";
+        if(ctrl.interact) {
+            ctrl.floor++;
+            maze = new Maze(11 + ctrl.floor*2);
+            player.x = 1.5; player.y = 1.5;
+            document.getElementById('lbl-floor').innerText = ctrl.floor;
+        }
+    } else {
+        document.getElementById('lbl-status').innerText = "EXPLORING...";
+    }
+
+    document.getElementById('lbl-z').innerText = ctrl.z.toFixed(2);
+    audio.update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+    ctx.save();
+    // Камера центрирована на игроке
+    ctx.translate(cvs.width/2 - player.x*cellSize, cvs.height/2 - player.y*cellSize);
+
+    for(let r=0; r<maze.size; r++){
+        for(let c=0; c<maze.size; c++){
+            if(maze.grid[r][c] === 1) {
+                ctx.fillStyle = '#1a1a20';
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                ctx.strokeStyle = '#333';
+                ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
+            } else if(maze.grid[r][c] === 2) {
+                ctx.fillStyle = '#0f0';
+                ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
+            }
+        }
+    }
+
+    // Игрок
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(player.x*cellSize, player.y*cellSize, cellSize*player.r, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // Прицел стика в углу для отладки
+    ctx.strokeStyle = '#555';
+    ctx.strokeRect(cvs.width - 120, 20, 100, 100);
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(cvs.width - 70 + ctrl.x*50 - 3, 70 + ctrl.y*50 - 3, 6, 6);
+}
+
+// === 5. BLUETOOTH СТАРТ ===
+document.getElementById('btn-start').onclick = async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        // Настройка АЦП
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
+
+        const dataChar = await service.getCharacteristic(DATA_UUID);
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let s = 2 + i*3;
+                    let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
+                    if(v & 0x800000) v -= 0x1000000;
+                    filters[i].process(v * UV_SCALE);
+                }
+            }
+        });
+
+        audio = new NeuroAudio();
+        document.getElementById('overlay').style.display = 'none';
+        isConnected = true;
+        gameLoop();
+    } catch(e) { alert("Ошибка BLE: " + e); }
+};
+</script>
+</body>
+</html>
