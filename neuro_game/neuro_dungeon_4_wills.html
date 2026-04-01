@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Tank: 4 Wills Engine</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border: 2px solid #0f0; border-radius: 8px; pointer-events: none; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 20;
+        }
+        button {
+            background: #000; color: #0f0; border: 2px solid #0f0;
+            padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
+        }
+        button:hover { background: #0f0; color: #000; }
+        .val { color: #fff; font-size: 18px; }
+        .stat { font-size: 16px; margin-bottom: 5px; }
+        
+        /* Визуализация 4-х Воль */
+        #wills { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 40px; z-index: 5; pointer-events: none; }
+        .will-box { width: 60px; height: 100px; border: 2px solid #444; position: relative; background: #111; }
+        .will-fill { width: 100%; position: absolute; bottom: 0; left: 0; background: #0f0; transition: height 0.1s; }
+        .will-label { width: 100%; text-align: center; color: #fff; font-size: 12px; margin-top: -20px; text-shadow: 0 0 5px #000; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">FLOOR: <span id="lbl-floor" class="val">1</span></div>
+    <div class="stat">DRIVE (Y): <span id="lbl-drive" class="val">0.00</span></div>
+    <div class="stat">STEER (X): <span id="lbl-steer" class="val">0.00</span></div>
+</div>
+
+<!-- Визуализация "силы" каждой воли -->
+<div id="wills">
+    <div><div class="will-box"><div id="w-lft" class="will-fill"></div></div><div class="will-label">LEFT</div></div>
+    <div><div class="will-box"><div id="w-fwd" class="will-fill"></div></div><div class="will-label">FWD</div></div>
+    <div><div class="will-box"><div id="w-bck" class="will-fill"></div></div><div class="will-label">BACK</div></div>
+    <div><div class="will-box"><div id="w-rgt" class="will-fill"></div></div><div class="will-label">RIGHT</div></div>
+</div>
+
+<div id="overlay">
+    <h1 style="color:#fff; text-shadow: 0 0 15px #0f0; font-size: 40px;">THE 4 WILLS ENGINE</h1>
+    <p style="color:#888; font-size: 18px; text-align: center;">
+        <b>Никакой калибровки. Настоящий ноль.</b><br>
+        Ось Y = Фокус Вперед минус Фокус Назад.<br>
+        Ось X = Фокус Вправо минус Фокус Влево.
+    </p>
+    <button id="btn-start">ACTIVATE BCI</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// === 1. НАСТРОЙКИ (4 WILLS) ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
+const PINS_X = ANGLES.map(Math.cos);
+const PINS_Y = ANGLES.map(Math.sin);
+
+let ctrl = { drive: 0, steer: 0, floor: 1 };
+let isConnected = false;
+
+// === 2. DSP: БЕТА/ГАММА ФИЛЬТР (18-40 Hz) ===
+class HighFreqFilter {
+    constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; this.energy = 0; }
+    process(x) {
+        // Butterworth Bandpass 18-40Hz @ 250Hz (Для активного моторного/пространственного намерения)
+        let out = 0.23 * x - 0.23 * this.x2 + 1.25 * this.y1 - 0.54 * this.y2;
+        this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
+        
+        // Усреднение энергии (Огибающая)
+        this.energy = this.energy * 0.95 + Math.abs(out) * 0.05;
+        return out;
+    }
+}
+const channels = Array.from({length: 8}, () => new HighFreqFilter());
+
+// === 3. АУДИО (ЗВУК ТАНКА) ===
+class TankAudio {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.osc = this.ctx.createOscillator();
+        this.gainL = this.ctx.createGain();
+        this.gainR = this.ctx.createGain();
+        
+        this.osc.type = 'triangle'; // Низкий "моторный" гул
+        this.merger = this.ctx.createChannelMerger(2);
+        
+        this.osc.connect(this.gainL); this.osc.connect(this.gainR);
+        this.gainL.connect(this.merger, 0, 0);
+        this.gainR.connect(this.merger, 0, 1);
+        this.merger.connect(this.ctx.destination);
+        
+        this.gainL.gain.value = 0; this.gainR.gain.value = 0;
+        this.osc.start();
+    }
+    update() {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        
+        // Громкость зависит от МОДУЛЯ скорости (едешь вперед или назад - мотор ревет)
+        let speed = Math.abs(ctrl.drive) + Math.abs(ctrl.steer);
+        let vol = Math.min(0.4, speed * 0.4);
+        
+        // Частота (Вперед - выше, Назад - ниже, Стоим - 100)
+        let freq = 100 + (ctrl.drive * 150);
+        this.osc.frequency.setTargetAtTime(Math.max(40, freq), this.ctx.currentTime, 0.1);
+        
+        // Руль = Панорама
+        let panL = Math.max(0, Math.min(1, 1.0 - ctrl.steer));
+        let panR = Math.max(0, Math.min(1, 1.0 + ctrl.steer));
+        
+        this.gainL.gain.setTargetAtTime(panL * vol, this.ctx.currentTime, 0.1);
+        this.gainR.gain.setTargetAtTime(panR * vol, this.ctx.currentTime, 0.1);
+    }
+}
+let audio;
+
+// === 4. ГЕНЕРАТОР ЛАБИРИНТА ===
+class Maze {
+    constructor(dim) {
+        this.dim = dim;
+        this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+        this.gen(1, 1);
+        this.grid[dim-2][dim-2] = 2; // Portal
+    }
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+}
+
+let maze = new Maze(11);
+let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 }; 
+const cellSize = 80;
+
+// === 5. ИГРОВОЙ ЦИКЛ (МАТЕМАТИКА 4 ВОЛЬ) ===
+function gameLoop() {
+    if(!isConnected) return;
+
+    // --- DSP: ВЫЧИСЛЕНИЕ 4-Х ИНТЕНЦИЙ ---
+    let energies = channels.map(c => c.energy);
+    
+    // Вычисляем "веса" для каждого квадранта датчика
+    let w_fwd = 0, w_bck = 0, w_lft = 0, w_rgt = 0;
+    
+    for(let i=0; i<8; i++) {
+        // Если координата пина > 0, он вносит вклад в "положительное" направление
+        // Если < 0, он вносит вклад в "отрицательное"
+        w_fwd += energies[i] * Math.max(0, PINS_Y[i]);
+        w_bck += energies[i] * Math.max(0, -PINS_Y[i]);
+        w_rgt += energies[i] * Math.max(0, PINS_X[i]);
+        w_lft += energies[i] * Math.max(0, -PINS_X[i]);
+    }
+    
+    let total_w = w_fwd + w_bck + w_lft + w_rgt + 0.001;
+
+    // --- ВЫЧИТАЕМ ИНТЕНЦИИ (Чистые оси) ---
+    let raw_drive = (w_fwd - w_bck) / total_w;
+    let raw_steer = (w_rgt - w_lft) / total_w;
+
+    // Мертвая зона (естественный шум, который мы не считаем за волю)
+    const DEADZONE = 0.05;
+    
+    if (Math.abs(raw_drive) < DEADZONE) raw_drive = 0.0;
+    if (Math.abs(raw_steer) < DEADZONE) raw_steer = 0.0;
+
+    // Коэффициент чувствительности
+    const SENSE = 15.0; 
+    
+    // Сглаживание управления для танка
+    ctrl.drive = ctrl.drive * 0.8 + Math.max(-1, Math.min(1, raw_drive * SENSE)) * 0.2;
+    ctrl.steer = ctrl.steer * 0.8 + Math.max(-1, Math.min(1, raw_steer * SENSE)) * 0.2;
+
+    // --- ВИЗУАЛИЗАЦИЯ ВОЛИ (Для дебага и обучения мозга) ---
+    document.getElementById('w-fwd').style.height = `${(w_fwd/total_w)*400}%`;
+    document.getElementById('w-bck').style.height = `${(w_bck/total_w)*400}%`;
+    document.getElementById('w-lft').style.height = `${(w_lft/total_w)*400}%`;
+    document.getElementById('w-rgt').style.height = `${(w_rgt/total_w)*400}%`;
+
+    // --- ФИЗИКА ТАНКА ---
+    let turnSpeed = 0.08;
+    player.angle += ctrl.steer * turnSpeed;
+
+    // Движение вперед и НАЗАД!
+    let moveSpeed = 0.15 * ctrl.drive;
+    let dx = Math.sin(player.angle) * moveSpeed;
+    let dy = -Math.cos(player.angle) * moveSpeed;
+
+    const hit = (tx, ty) => {
+        let gx = Math.floor(tx), gy = Math.floor(ty);
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+        return maze.grid[gy][gx] === 1;
+    };
+
+    if(!hit(player.x + dx + Math.sign(dx)*player.r, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy + Math.sign(dy)*player.r)) player.y += dy;
+
+    // ПОРТАЛ
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
+        if(ctrl.drive > 0.6) { // Чтобы войти, нужно дать "ГАЗ ВПЕРЕД"
+            ctrl.floor++;
+            maze = new Maze(11 + ctrl.floor*2);
+            player.x = 1.5; player.y = 1.5; player.angle = 0;
+            document.getElementById('lbl-floor').innerText = ctrl.floor;
+        }
+    }
+
+    // UI
+    document.getElementById('lbl-steer').innerText = ctrl.steer.toFixed(2);
+    document.getElementById('lbl-drive').innerText = ctrl.drive.toFixed(2);
+
+    audio.update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.rotate(-player.angle);
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
+    for(let r=0; r<maze.dim; r++){
+        for(let c=0; c<maze.dim; c++){
+            if(maze.grid[r][c] === 1) {
+                ctx.fillStyle = '#1a1a20'; ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
+            } else if(maze.grid[r][c] === 2) {
+                ctx.fillStyle = '#0f0'; ctx.beginPath();
+                ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
+            }
+        }
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.fillStyle = '#0ff'; ctx.beginPath();
+    ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    ctx.moveTo(0, -cellSize*player.r - 10);
+    ctx.lineTo(-10, -cellSize*player.r + 5);
+    ctx.lineTo(10, -cellSize*player.r + 5); ctx.fill();
+    ctx.restore();
+}
+
+// === 6. СТАРТ ===
+document.getElementById('btn-start').onclick = async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        const dataChar = await service.getCharacteristic(DATA_UUID);
+
+        let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
+
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let s = 2 + i*3;
+                    let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
+                    if(v & 0x800000) v -= 0x1000000;
+                    channels[i].process(v * UV_SCALE);
+                }
+            }
+        });
+
+        audio = new EngineAudio();
+        document.getElementById('overlay').style.display = 'none';
+        isConnected = true;
+        requestAnimationFrame(gameLoop);
+    } catch(e) { alert(e); }
+};
+</script>
+</body>
+</html>
