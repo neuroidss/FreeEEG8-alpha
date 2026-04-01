@@ -3,65 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Dungeon: Phase Stick v5.4</title>
+    <title>Neuro Reactor Engine v7.0</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 220px; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 260px; }
         .stat { font-size: 13px; margin-bottom: 5px; display: flex; justify-content: space-between; color: #0f0; }
         #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
         #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; }
+        #radar { width: 120px; height: 120px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: radial-gradient(circle, #111 0%, #000 100%); }
+        .node-dot { width: 4px; height: 4px; background: #555; position: absolute; border-radius: 50%; }
+        #pointer { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #fff; z-index: 10; }
         .slider-box { margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; }
         input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
-        #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #000; }
-        #radar::after { content: ''; position: absolute; top: 50%; left: 50%; width: 100%; height: 1px; background: rgba(255,255,255,0.1); transform: translate(-50%,-50%); }
-        #radar::before { content: ''; position: absolute; top: 50%; left: 50%; height: 100%; width: 1px; background: rgba(255,255,255,0.1); transform: translate(-50%,-50%); }
-        #pointer { width: 8px; height: 8px; background: #f0f; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #f0f; z-index: 5; }
-        #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
-        button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 20px 40px; font-size: 24px; cursor: pointer; border-radius: 10px; }
+        #overlay { position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
+        button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 20px 40px; font-size: 24px; cursor: pointer; box-shadow: 0 0 20px #0f0; }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff">1</span></div>
-    <div class="stat">SYNAPTIC TRACE:</div>
+    <div class="stat">REACTOR CORE: <span id="lbl-energy" style="color:#fff">OFFLINE</span></div>
+    <div class="stat">PHASE STABILITY:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
-    
-    <div id="radar"><div id="pointer"></div></div>
-
+    <div id="radar">
+        <div id="pointer"></div>
+        <!-- Электроды будут добавлены скриптом -->
+    </div>
     <div class="slider-box">
-        <div class="stat" style="font-size: 10px;"><span>STABILITY LEVEL</span><span id="lbl-skill">0.05</span></div>
+        <div class="stat" style="font-size: 10px;"><span>SENSE</span><span id="lbl-skill">0.05</span></div>
         <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
     </div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">PHASE DUNGEON v5.4</h1>
-    <p style="color:#888; font-size: 14px; max-width: 500px;">Единый фазовый стик: Y-ход, X-поворот.<br>Коллизии восстановлены.</p>
-    <button id="btn-start">CONNECT BLE</button>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v7.0</h1>
+    <p style="color:#888; max-width: 600px; padding: 20px;">
+        Это не музыка. Это акустический рендер 28 нейронных связей.<br>
+        Слышишь гул — реактор заряжен. Нарушь симметрию, чтобы направить тягу.
+    </p>
+    <button id="btn-start">ACTIVATE CORE</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
 // ГЕОМЕТРИЯ (ТВОИ УГЛЫ)
-const RADIUS = 10; 
+const RADIUS = 10;
 const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
-const BUF_SIZE = 256; 
+const BUF_SIZE = 256;
 
 let isConnected = false;
 let skillLevel = 0.05;
 let synapticPersistence = 0;
 let lastRawVector = { x: 0, y: 0 };
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-let ctrl = { x: 0, y: 0 }; // x: Turn, y: Speed
+let ctrl = { x: 0, y: 0 }; 
 let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 };
 let maze;
 
-// FFT + NOTCH
+// --- РЕАКТОРНЫЙ АУДИО-ДВИЖОК ---
+class NeuroReactor {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.connect(this.ctx.destination);
+        
+        // Создаем 8 базовых голосов (по одному на электрод)
+        // Но озвучиваем перетоки между ними
+        this.voices = ELECTRODES.map((pos, i) => {
+            let osc = this.ctx.createOscillator();
+            let gain = this.ctx.createGain();
+            let pan = this.ctx.createStereoPanner();
+            
+            osc.type = 'triangle';
+            osc.frequency.value = 40 + i * 10; // Гармоническая серия
+            gain.gain.value = 0;
+            pan.pan.value = pos.x / RADIUS;
+
+            osc.connect(gain).connect(pan).connect(this.masterGain);
+            osc.start();
+            return { osc, gain, pan, baseFreq: 40 + i * 10 };
+        });
+
+        // Пси-шум (структура вакуума)
+        this.lpFilter = this.ctx.createBiquadFilter();
+        this.lpFilter.type = 'lowpass';
+        this.lpFilter.Q.value = 20;
+    }
+
+    update(vx, vy, pairsData, stability) {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const t = this.ctx.currentTime;
+        
+        // 1. Озвучиваем "Давление" на каждый электрод
+        // Для каждого электрода k считаем сумму ciPLV всех пар, где он участвует
+        let electrodePressure = new Array(8).fill(0);
+        pairsData.forEach(p => {
+            electrodePressure[p.i] += Math.abs(p.val);
+            electrodePressure[p.j] += Math.abs(p.val);
+        });
+
+        const totalEnergy = electrodePressure.reduce((a, b) => a + b, 0);
+        
+        this.voices.forEach((v, i) => {
+            // Громкость голоса зависит от вовлеченности электрода в когерентные пары
+            let targetGain = (electrodePressure[i] / (totalEnergy + 1e-6)) * stability;
+            v.gain.gain.setTargetAtTime(targetGain * 0.8, t, 0.1);
+            
+            // Частота "плавает" от локального фазового сдвига
+            v.osc.frequency.setTargetAtTime(v.baseFreq + (vx + vy) * 20, t, 0.1);
+        });
+
+        // Мастер-фильтр открывается от общей энергии
+        let cutoff = 50 + (totalEnergy * 200);
+        this.lpFilter.frequency.setTargetAtTime(Math.min(2000, cutoff), t, 0.1);
+        
+        document.getElementById('lbl-energy').innerText = totalEnergy > 0.1 ? "ACTIVE" : "IDLE";
+    }
+}
+let reactor;
+
+// --- МАТЕМАТИКА (FFT + ciPLV) ---
 function fft(re, im) {
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
@@ -85,14 +150,6 @@ function fft(re, im) {
     }
 }
 
-function applyNotchFilters(re, im) {
-    const n50 = Math.round(50 * BUF_SIZE / 250);
-    const n100 = Math.round(100 * BUF_SIZE / 250);
-    for(let k of [n50, n100]) {
-        for(let i=-1; i<=1; i++) { if(re[k+i]) re[k+i]=im[k+i]=0; }
-    }
-}
-
 function get_ciPLV(idxA, idxB, spectra) {
     let sum_re = 0, sum_im = 0;
     for (let k = 18; k <= 36; k++) {
@@ -107,6 +164,7 @@ function get_ciPLV(idxA, idxB, spectra) {
     return denom < 0.001 ? 0 : mIm / denom;
 }
 
+// --- MAZE ENGINE ---
 class Maze {
     constructor(dim) {
         this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
@@ -126,7 +184,6 @@ class Maze {
 function gameLoop() {
     if(!isConnected) return;
 
-    // CAR
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
         let avg = 0; for(let c=0; c<8; c++) avg += eegBuffer[c][t];
@@ -134,69 +191,64 @@ function gameLoop() {
         for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - avg;
     }
 
-    // FFT
     let spectra = centered.map(ch => {
         let re = new Float32Array(ch), im = new Float32Array(BUF_SIZE);
-        fft(re, im); applyNotchFilters(re, im); return {re, im};
+        fft(re, im); return {re, im};
     });
 
-    // TENSOR STICK (vx, vy)
     let vx = 0, vy = 0;
+    let pairsData = [];
+
+    // All-to-All ciPLV (28 векторов)
     for(let i=0; i<8; i++) {
         for(let j=i+1; j<8; j++) {
             let val = get_ciPLV(i, j, spectra);
-            vx += val * (ELECTRODES[j].x - ELECTRODES[i].x);
-            vy += val * (ELECTRODES[j].y - ELECTRODES[i].y);
+            let dx = ELECTRODES[j].x - ELECTRODES[i].x;
+            let dy = ELECTRODES[j].y - ELECTRODES[i].y;
+            vx += val * dx;
+            vy += val * dy;
+            pairsData.push({i, j, val});
         }
     }
 
-    // Stability Trace
     let mag = Math.sqrt(vx*vx + vy*vy);
     let dot = vx * lastRawVector.x + vy * lastRawVector.y;
     let cosTheta = dot / (mag * Math.sqrt(lastRawVector.x**2 + lastRawVector.y**2) + 1e-6);
-    if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.01);
-    else synapticPersistence *= 0.99;
+    
+    if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.015);
+    else synapticPersistence *= 0.98;
     lastRawVector = {x: vx, y: vy};
 
-    // Unified Physics
     const smooth = 0.96;
     ctrl.x = ctrl.x * smooth + vx * (1-smooth);
     ctrl.y = ctrl.y * smooth + vy * (1-smooth);
 
-    // Модификаторы скорости от уровня киберности
-    let boost = (1.0 + synapticPersistence * 4.0);
-    
-    // ПОВОРОТ (Сбалансирован: vx)
-    // Коэффициент 0.015 откалиброван, чтобы танк не крутился безумно
+    let boost = (1.0 + synapticPersistence * 5.0);
     player.angle += ctrl.x * skillLevel * 0.4 * boost;
-
-    // ХОД (Y отклонение: vy)
     let speed = -ctrl.y * skillLevel * 0.3 * boost;
     
     let dx = Math.sin(player.angle) * speed;
     let dy = -Math.cos(player.angle) * speed;
 
-    // ПРАВИЛЬНЫЕ КОЛЛИЗИИ (Оригинальная логика)
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
         if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
         return maze.grid[gy][gx] === 1;
     };
-    
-    // Проверка по осям для скольжения
-    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) player.x += dx;
-    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) player.y += dy;
+    if(!hit(player.x + dx, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy)) player.y += dy;
 
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
-        document.getElementById('lbl-floor').innerText = fl;
-        maze = new Maze(9 + fl*2); player.x = player.y = 1.5;
+        maze = new Maze(maze.dim + 2); player.x = player.y = 1.5;
     }
 
-    // UI
-    document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
+    // Обновляем Реактор: передаем все пары данных для синтеза структуры
+    reactor.update(vx, vy, pairsData, synapticPersistence);
+
+    // UI Radar
     document.getElementById('pointer').style.left = (50 + ctrl.x * 4) + '%';
     document.getElementById('pointer').style.top = (50 + ctrl.y * 4) + '%';
+    document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
 
     render();
     requestAnimationFrame(gameLoop);
@@ -206,7 +258,7 @@ function render() {
     const cvs = document.getElementById('gameCanvas');
     const ctx = cvs.getContext('2d');
     cvs.width = window.innerWidth; cvs.height = window.innerHeight;
-    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,cvs.width,cvs.height);
     const cellSize = 80;
     ctx.save();
     ctx.translate(cvs.width/2, cvs.height/2);
@@ -215,9 +267,8 @@ function render() {
     for(let r=0; r<maze.dim; r++){
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) {
-                ctx.fillStyle = `rgb(0, ${20 + synapticPersistence*80}, 40)`;
+                ctx.fillStyle = `rgb(10, ${20 + synapticPersistence*100}, 40)`;
                 ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
-                ctx.strokeStyle = 'rgba(0,255,0,0.1)'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             } else if(maze.grid[r][c] === 2) {
                 ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
             }
@@ -226,10 +277,20 @@ function render() {
     ctx.restore();
     ctx.save();
     ctx.translate(cvs.width/2, cvs.height/2);
-    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(-7, 5); ctx.lineTo(7, 5); ctx.fill();
     ctx.restore();
 }
+
+// Электроды на радаре
+const radar = document.getElementById('radar');
+ELECTRODES.forEach((e, i) => {
+    let dot = document.createElement('div');
+    dot.className = 'node-dot';
+    dot.style.left = (50 + e.x * 4) + '%';
+    dot.style.top = (50 + e.y * 4) + '%';
+    radar.appendChild(dot);
+});
 
 document.getElementById('skill-slider').oninput = (e) => {
     skillLevel = parseFloat(e.target.value);
@@ -256,6 +317,7 @@ document.getElementById('btn-start').onclick = async () => {
                 }
             }
         });
+        reactor = new NeuroReactor();
         maze = new Maze(9);
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
