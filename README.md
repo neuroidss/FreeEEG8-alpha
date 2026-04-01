@@ -1,5 +1,7 @@
 # FreeEEG8-alpha
 
+[neuro_dungeon_joystick](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_joystick.html)
+
 [neuro_dungeon_4_wills](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_4_wills.html)
 
 [neuro_dungeon](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon.html)
