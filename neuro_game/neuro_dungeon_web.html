@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Dungeon Web: The 10mm Quest</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 20;
+        }
+        button {
+            background: #000; color: #0f0; border: 2px solid #0f0;
+            padding: 20px 40px; font-size: 20px; font-weight: bold;
+            cursor: pointer; pointer-events: auto; border-radius: 10px;
+            box-shadow: 0 0 15px #0f0;
+        }
+        button:active { background: #0f0; color: #000; }
+        .stat { font-size: 18px; margin-bottom: 5px; text-shadow: 0 0 5px #0f0; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat" id="lbl-floor">FLOOR: 1</div>
+    <div class="stat" id="lbl-status">READY TO SCAN</div>
+    <div class="stat" id="lbl-focus">FOCUS: 0.00</div>
+    <div class="stat" id="lbl-loot">NEURONS: 0 / 3</div>
+</div>
+
+<div id="overlay">
+    <h1 style="color:#fff; text-shadow:0 0 20px #0f0;">NEURO DUNGEON WEB</h1>
+    <p style="color:#aaa; text-align:center;">Управление: Нейро-стик (пространственное внимание)<br>Атака: Мысленный выпад | Сбор: Удержание фокуса</p>
+    <button id="btn-start">CONNECT FREEEEG8</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// === КОНСТАНТЫ И АДРЕСА ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6; // Gain 4
+
+// Геометрия 8 пинов (радиус 10мм)
+const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
+const PINS_X = ANGLES.map(Math.cos);
+const PINS_Y = ANGLES.map(Math.sin);
+
+// === ГЕЙМПЛЕЙНЫЙ СТЕЙТ ===
+let ctrl = { x: 0, y: 0, z: 0, attack: false, interact: false, floor: 1, loot: 0, totalLoot: 3 };
+let isConnected = false;
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// === ГЕНЕРАТОР ЛАБИРИНТА ===
+class Maze {
+    constructor(dim) {
+        this.dim = dim;
+        this.data = Array.from({length: dim}, () => Array(dim).fill(1));
+        this.generate(1, 1);
+        this.data[dim-2][dim-2] = 2; // Портал
+        this.lootPos = [];
+        this.spawnLoot(3);
+    }
+    generate(x, y) {
+        this.data[y][x] = 0;
+        const dirs = [[0,1],[0,-1],[1,0],[-1,0]].sort(() => Math.random() - 0.5);
+        for(let [dx, dy] of dirs) {
+            let nx = x + dx*2, ny = y + dy*2;
+            if(nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1 && this.data[ny][nx] === 1) {
+                this.data[y+dy][x+dx] = 0;
+                this.generate(nx, ny);
+            }
+        }
+    }
+    spawnLoot(count) {
+        for(let i=0; i<count; i++) {
+            let rx = Math.floor(Math.random()*this.dim), ry = Math.floor(Math.random()*this.dim);
+            if(this.data[ry][rx] === 0) this.data[ry][rx] = 3; // Loot
+        }
+    }
+}
+
+let maze = new Maze(9);
+let player = { x: 1.5, y: 1.5, r: 0.35 };
+const cellSize = 50;
+
+// === DSP: АНАЛИЗ МОЗГА ===
+let eegBuffer = Array.from({length: 8}, () => new Float32Array(250).fill(0));
+let lastStickX = 0, lastStickY = 0;
+
+function processEEG() {
+    // 1. Считаем энергию в каждом канале (грубая замена FFT для скорости в JS)
+    // В вебе для простоты считаем среднее абсолютное отклонение в окне
+    let intensities = eegBuffer.map(buf => {
+        let m = buf.reduce((a, b) => a + b, 0) / buf.length;
+        return buf.reduce((a, b) => a + Math.abs(b - m), 0) / buf.length;
+    });
+
+    let meanInt = intensities.reduce((a, b) => a + b, 0) / 8;
+    let maxInt = Math.max(...intensities);
+    
+    // ОСЬ Z (Фокус)
+    let focus = maxInt / (meanInt + 0.001);
+    ctrl.z = Math.max(0, Math.min(1, (focus - 1.1) * 2));
+    document.getElementById('lbl-focus').innerText = `FOCUS: ${ctrl.z.toFixed(2)}`;
+
+    if (ctrl.z > 0.1) {
+        // ОСИ X, Y (Центроид)
+        let cx = 0, cy = 0, sum = 0;
+        for(let i=0; i<8; i++) {
+            cx += intensities[i] * PINS_X[i];
+            cy += intensities[i] * PINS_Y[i];
+            sum += intensities[i];
+        }
+        cx /= sum; cy /= sum;
+        
+        let targetX = Math.max(-1, Math.min(1, cx * 10));
+        let targetY = Math.max(-1, Math.min(1, cy * 10));
+        
+        // Кинетическая атака (скорость изменения вектора)
+        let vel = Math.sqrt((targetX - lastStickX)**2 + (targetY - lastStickY)**2);
+        ctrl.attack = vel > 0.4;
+        
+        lastStickX = targetX; lastStickY = targetY;
+        ctrl.x = targetX; ctrl.y = targetY;
+    } else {
+        ctrl.x *= 0.8; ctrl.y *= 0.8; ctrl.attack = false;
+    }
+}
+
+// === ИГРОВОЙ ЦИКЛ ===
+function update() {
+    if(!isConnected) return;
+    processEEG();
+
+    const speed = 0.1;
+    let nextX = player.x + ctrl.x * speed;
+    let nextY = player.y + ctrl.y * speed;
+
+    // Коллизии
+    const isWall = (tx, ty) => {
+        let gx = Math.floor(tx), gy = Math.floor(ty);
+        return maze.data[gy] && maze.data[gy][gx] === 1;
+    };
+
+    if(!isWall(nextX + Math.sign(ctrl.x)*player.r, player.y)) player.x = nextX;
+    if(!isWall(player.x, nextY + Math.sign(ctrl.y)*player.r)) player.y = nextY;
+
+    // Сбор лута и Портал
+    let gx = Math.floor(player.x), gy = Math.floor(player.y);
+    let cell = maze.data[gy][gx];
+    
+    if(cell === 3 && ctrl.z > 0.7) { // Нужно сфокусироваться на клетке с лутом
+        maze.data[gy][gx] = 0;
+        ctrl.loot++;
+        document.getElementById('lbl-loot').innerText = `NEURONS: ${ctrl.loot} / ${ctrl.totalLoot}`;
+    }
+    
+    if(cell === 2 && ctrl.z > 0.85) { // Портал
+        ctrl.floor++;
+        maze = new Maze(9 + ctrl.floor);
+        player.x = 1.5; player.y = 1.5;
+        ctrl.loot = 0;
+        document.getElementById('lbl-floor').innerText = `FLOOR: ${ctrl.floor}`;
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(canvas.width/2 - player.x*cellSize, canvas.height/2 - player.y*cellSize);
+
+    // Рисуем лабиринт
+    for(let r=0; r<maze.dim; r++) {
+        for(let c=0; c<maze.dim; c++) {
+            let val = maze.data[r][c];
+            if(val === 1) {
+                ctx.fillStyle = '#222'; ctx.fillRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
+                ctx.strokeStyle = '#444'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
+            } else if(val === 2) {
+                ctx.fillStyle = '#0f0'; ctx.beginPath();
+                ctx.arc(c*cellSize + cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2);
+                ctx.fill();
+            } else if(val === 3) {
+                ctx.fillStyle = '#ff0'; ctx.font = "20px Arial"; ctx.fillText("💎", c*cellSize+15, r*cellSize+30);
+            }
+        }
+    }
+
+    // Игрок
+    ctx.fillStyle = '#0ff'; ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
+    ctx.beginPath(); ctx.arc(player.x*cellSize, player.y*cellSize, player.r*cellSize, 0, Math.PI*2); ctx.fill();
+    
+    // Атака
+    if(ctrl.attack) {
+        ctx.strokeStyle = '#f00'; ctx.lineWidth = 5; ctx.beginPath();
+        ctx.arc(player.x*cellSize, player.y*cellSize, player.r*cellSize*2, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+}
+
+// === WEB BLUETOOTH ===
+document.getElementById('btn-start').onclick = async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        
+        // Настройка АЦП (Gain 4)
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
+
+        const dataChar = await service.getCharacteristic(DATA_UUID);
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let buf = new Uint8Array(e.target.value.buffer);
+            if(buf[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let start = 2 + i*3;
+                    let v = (buf[start]<<16) | (buf[start+1]<<8) | buf[start+2];
+                    if(v & 0x800000) v -= 0x1000000;
+                    eegBuffer[i].set(eegBuffer[i].subarray(1));
+                    eegBuffer[i][249] = v * UV_SCALE;
+                }
+            }
+        });
+
+        document.getElementById('overlay').style.display = 'none';
+        isConnected = true;
+        update();
+    } catch(e) { console.error(e); }
+};
+</script>
+</body>
+</html>
