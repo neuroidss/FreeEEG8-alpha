@@ -61,12 +61,12 @@ const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6; // GAIN = 4
 
-// Группы электродов, соответствующие вашим осям симметрии
+// Группы электродов для осей симметрии
 const GRP = {
-    // Вертикальная ось: Левые vs Правые
-    L: [4, 5, 6, 7], R: [0, 1, 2, 3],
-    // Горизонтальная ось: Передние vs Задние
-    F: [2, 3, 4, 5], B: [0, 1, 6, 7] 
+    // Вертикальная ось: Передние vs Задние
+    F: [3, 4, 2, 5], B: [0, 7, 1, 6],
+    // Горизонтальная ось: Правые vs Левые
+    R: [0, 1, 2, 3], L: [7, 6, 5, 4]
 };
 
 let ctrl = { x: 0, y: 0, floor: 1 };
@@ -107,7 +107,7 @@ function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
         let magB = Math.sqrt(reB*reB + imB*imB) || 1;
         
         let uA_re = reA/magA, uA_im = imA/magA;
-        let uB_re = reB/magB, uB_im = -imB/magB; // Сопряженное для B
+        let uB_re = reB/magB, uB_im = -imB/magB;
         
         sum_re += uA_re*uB_re - uA_im*uB_im;
         sum_im += uA_re*uB_im + uA_im*uB_re;
@@ -222,23 +222,9 @@ function render() {
 }
 
 // === 7. BLE СТАРТ И НАСТРОЙКА АЦП ===
-async function writeAndVerify(cmdChar, addr, val, mask, desc) {
-    console.log(`VERIFYING: ${desc} (Addr: 0x${addr.toString(16)})`);
-    for (let i = 0; i < 5; i++) {
-        await cmdChar.writeValueWithoutResponse(new Uint8Array([addr, (val >> 8) & 0xFF, val & 0xFF]));
-        await new Promise(r => setTimeout(r, 150));
-        
-        // Чтение для верификации не реализовано в прошивке, поэтому доверяем записи.
-        // Главное - выдержать паузу.
-    }
-    console.log(` -> Sent config for ${desc}. Assuming OK.`);
-    return true;
-}
-
-
 document.getElementById('btn-start').onclick = async () => {
+    const btn = document.getElementById('btn-start');
     try {
-        const btn = document.getElementById('btn-start');
         btn.innerText = "SCANNING...";
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
         
@@ -250,18 +236,20 @@ document.getElementById('btn-start').onclick = async () => {
         
         btn.innerText = "CONFIGURING ADC...";
         
-        // Важно: Начинаем слушать ответы на команды ДО того, как их отправлять
-        await cmdChar.startNotifications();
-        cmdChar.addEventListener('characteristicvaluechanged', (e) => {
-            let d = new Uint8Array(e.target.value.buffer);
-            console.log(`CMD Response: Addr 0x${d[0].toString(16)} -> Val 0x${((d[1]<<8)|d[2]).toString(16)}`);
-        });
-
-        // Установка GAIN=4 (pga=2).
-        let pga = 2; 
-        let gain_val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
-        await writeAndVerify(cmdChar, 0x04, gain_val, 0xFFFF, "GAIN1");
-        await writeAndVerify(cmdChar, 0x05, gain_val, 0xFFFF, "GAIN2");
+        // Устанавливаем GAIN=4 (код для регистра pga=2).
+        const pga = 2; 
+        const gain_val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        
+        // Отправляем команды с паузой
+        console.log("Setting GAIN1 register...");
+        await cmdChar.writeValueWithoutResponse(new Uint8Array([0x04, (gain_val >> 8) & 0xFF, gain_val & 0xFF]));
+        await new Promise(r => setTimeout(r, 150)); // Пауза для обработки команды устройством
+        
+        console.log("Setting GAIN2 register...");
+        await cmdChar.writeValueWithoutResponse(new Uint8Array([0x05, (gain_val >> 8) & 0xFF, gain_val & 0xFF]));
+        await new Promise(r => setTimeout(r, 150));
+        
+        console.log("ADC Configured. Starting notifications...");
 
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
@@ -282,7 +270,7 @@ document.getElementById('btn-start').onclick = async () => {
         requestAnimationFrame(gameLoop);
     } catch(e) { 
         alert("ОШИБКА BLE: " + e); 
-        document.getElementById('btn-start').innerText = "ACTIVATE BCI";
+        btn.innerText = "ACTIVATE BCI";
     }
 };
 </script>
