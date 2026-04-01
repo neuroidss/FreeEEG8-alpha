@@ -72,7 +72,7 @@
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
-const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6; // GAIN = 4
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6; // GAIN = 4 (как в прошивке)
 
 let ctrl = { x: 0, y: 0, d1: 0, d2: 0, floor: 1 };
 let isConnected = false;
@@ -80,16 +80,12 @@ let isConnected = false;
 const BUF_SIZE = 256; 
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
 
-// Группы электродов для 4-х осей симметрии
+// Группы электродов, соответствующие вашим осям симметрии
 const GRP = {
-    // Горизонтальная ось: Правые vs Левые
-    R: [0, 1, 2, 3], L:[7, 6, 5, 4], 
-    // Вертикальная ось: Передние vs Задние
-    F:[2, 3, 4, 5], B: [1, 0, 6, 7], 
-    // Диагональ 1: Верх-право vs Низ-лево
-    TR: [1, 2, 3, 4], BL:[7, 6, 5, 0], 
-    // Диагональ 2: Верх-лево vs Низ-право
-    TL:[3, 4, 5, 6], BR: [1, 0, 7, 2]  
+    L: [4, 5, 6, 7], R: [0, 1, 2, 3], // Горизонтальная ось: левые vs правые
+    F: [2, 3, 4, 5], B: [0, 1, 6, 7], // Вертикальная ось: передние vs задние
+    TR: [1, 2, 3, 4], BL: [5, 6, 7, 0], // Диагональ 1: Top-Right vs Bottom-Left
+    TL: [3, 4, 5, 6], BR: [7, 0, 1, 2]  // Диагональ 2: Top-Left vs Bottom-Right
 };
 
 
@@ -121,21 +117,24 @@ function fft(re, im) {
     }
 }
 
-// === 3. РАСЧЕТ ciPLV (По статье) ===
+// === 3. РАСЧЕТ ciPLV (НОВАЯ, ИСПРАВЛЕННАЯ РЕАЛИЗАЦИЯ) ===
 function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
     let sum_re = 0, sum_im = 0, count = 0;
     
     for (let k = binStart; k <= binEnd; k++) {
+        // Комплексная сумма для Региона А
         let reA = 0, imA = 0;
         for (let c of grpA) { reA += spectra[c].re[k]; imA += spectra[c].im[k]; }
-        let magA = Math.sqrt(reA*reA + imA*imA) || 1;
+        let magA = Math.sqrt(reA*reA + imA*imA) || 1e-9;
         let uA_re = reA / magA, uA_im = imA / magA;
 
+        // Комплексная сумма для Региона B
         let reB = 0, imB = 0;
         for (let c of grpB) { reB += spectra[c].re[k]; imB += spectra[c].im[k]; }
-        let magB = Math.sqrt(reB*reB + imB*imB) || 1;
-        let uB_re = reB / magB, uB_im = -imB / magB; 
+        let magB = Math.sqrt(reB*reB + imB*imB) || 1e-9;
+        let uB_re = reB / magB, uB_im = -imB / magB; // Сопряженное для B
 
+        // Комплексное умножение: U_A * U_B_conjugate
         let cross_re = uA_re * uB_re - uA_im * uB_im;
         let cross_im = uA_re * uB_im + uA_im * uB_re;
 
@@ -146,8 +145,9 @@ function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
     let mean_re = sum_re / count;
     let mean_im = sum_im / count;
     
+    // Формула ciPLV (Eq. 14 из статьи)
     let denom = Math.sqrt(Math.max(0, 1.0 - mean_re*mean_re));
-    if (denom < 0.01) return 0.0;
+    if (denom < 0.01) return 0.0; // Игнорируем zero-lag синхронизацию
     
     return mean_im / denom;
 }
@@ -156,144 +156,63 @@ function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
 class ciPLVAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        
         this.oscLead = this.ctx.createOscillator(); this.oscLead.type = 'square'; this.oscLead.frequency.value = 440;
         this.filtLead = this.ctx.createBiquadFilter(); this.filtLead.type = 'bandpass'; this.filtLead.Q.value = 5;
         this.volLead = this.ctx.createGain(); this.volLead.gain.value = 0;
         this.panLead = this.ctx.createStereoPanner();
         this.oscLead.connect(this.filtLead).connect(this.volLead).connect(this.panLead).connect(this.ctx.destination);
-
         this.oscBass = this.ctx.createOscillator(); this.oscBass.type = 'sawtooth'; this.oscBass.frequency.value = 55;
         this.filtBass = this.ctx.createBiquadFilter(); this.filtBass.type = 'lowpass';
         this.volBass = this.ctx.createGain(); this.volBass.gain.value = 0;
         this.panBass = this.ctx.createStereoPanner();
         this.oscBass.connect(this.filtBass).connect(this.volBass).connect(this.panBass).connect(this.ctx.destination);
-
         this.oscLead.start(); this.oscBass.start();
     }
-
     update() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const t = this.ctx.currentTime;
-        
-        let vLead = Math.max(0, ctrl.y);
-        let vBass = Math.max(0, -ctrl.y);
-        
-        this.volLead.gain.setTargetAtTime(Math.min(0.5, vLead), t, 0.1);
-        this.volBass.gain.setTargetAtTime(Math.min(0.8, vBass), t, 0.1);
+        this.volLead.gain.setTargetAtTime(Math.min(0.5, Math.max(0, ctrl.y)), t, 0.1);
+        this.volBass.gain.setTargetAtTime(Math.min(0.8, Math.max(0, -ctrl.y)), t, 0.1);
         this.panLead.pan.setTargetAtTime(ctrl.x, t, 0.1);
         this.panBass.pan.setTargetAtTime(ctrl.x, t, 0.1);
-
-        let acid = 5 + Math.abs(ctrl.d1) * 25;
-        this.filtLead.Q.setTargetAtTime(acid, t, 0.1);
+        this.filtLead.Q.setTargetAtTime(5 + Math.abs(ctrl.d1) * 25, t, 0.1);
         this.filtLead.frequency.setTargetAtTime(440 + ctrl.d1 * 2000, t, 0.1);
-
-        let wobble = 100 + Math.abs(ctrl.d2) * 800;
-        this.filtBass.frequency.setTargetAtTime(wobble, t, 0.1);
+        this.filtBass.frequency.setTargetAtTime(100 + Math.abs(ctrl.d2) * 800, t, 0.1);
     }
 }
 let audio;
 
 // === 5. ДВИЖОК ЛАБИРИНТА ===
 class Maze {
-    constructor(dim) {
-        this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
-        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; 
-    }
-    gen(x, y) {
-        this.grid[y][x] = 0;
-        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
-            let nx=x+dx*2, ny=y+dy*2;
-            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
-                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
-            }
-        });
-    }
-}
-let maze = new Maze(9);
-let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }; 
-const cellSize = 80;
+    constructor(dim) { this.dim=dim; this.grid=Array.from({length:dim},()=>Array(dim).fill(1)); this.gen(1,1); this.grid[dim-2][dim-2]=2; }
+    gen(x,y){this.grid[y][x]=0;[[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx,dy])=>{let nx=x+dx*2,ny=y+dy*2;if(nx>0&&nx<this.dim-1&&ny>0&&ny<this.dim-1&&this.grid[ny][nx]===1){this.grid[y+dy][x+dx]=0;this.gen(nx,ny);}});}}
+let maze = new Maze(9), player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }, cellSize = 80;
 
 // === 6. ИГРОВОЙ ЦИКЛ ===
 function gameLoop() {
     if(!isConnected) return;
+    let centered=Array.from({length:8},()=>new Float32Array(BUF_SIZE));for(let t=0;t<BUF_SIZE;t++){let m=0;for(let c=0;c<8;c++)m+=eegBuffer[c][t];m/=8;for(let c=0;c<8;c++)centered[c][t]=eegBuffer[c][t]-m;}
+    let spectra=[];for(let c=0;c<8;c++){let re=new Float32Array(centered[c]),im=new Float32Array(BUF_SIZE);fft(re,im);spectra.push({re,im});}
 
-    // CAR
-    let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-    for(let t=0; t<BUF_SIZE; t++) {
-        let mean = 0; for(let c=0; c<8; c++) mean += eegBuffer[c][t];
-        mean /= 8;
-        for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - mean;
-    }
-
-    // FFT
-    let spectra =[];
-    for(let c=0; c<8; c++) {
-        let re = new Float32Array(centered[c]), im = new Float32Array(BUF_SIZE);
-        fft(re, im);
-        spectra.push({re, im});
-    }
-
-    // Рассчитываем 4 оси ciPLV в диапазоне 8-25 Гц (бины FFT 8..26)
-    let b1=8, b2=26;
+    // Диапазон частот 8-25 Гц -> бины FFT 8..26 (при FS=250, N=256)
+    let b1=8, b2=26; 
     let ci_y = calc_ciPLV(GRP.F, GRP.B, spectra, b1, b2);
     let ci_x = calc_ciPLV(GRP.L, GRP.R, spectra, b1, b2);
     let ci_d1 = calc_ciPLV(GRP.TR, GRP.BL, spectra, b1, b2);
     let ci_d2 = calc_ciPLV(GRP.TL, GRP.BR, spectra, b1, b2);
 
-    const DEADZONE = 0.1, SENSE = 2.0; 
-    const apply = (old, val) => {
-        let v = (Math.abs(val) > DEADZONE) ? val : 0;
-        return old * 0.8 + Math.max(-1, Math.min(1, v * SENSE)) * 0.2;
-    };
-    ctrl.y = apply(ctrl.y, ci_y); ctrl.x = apply(ctrl.x, ci_x);
-    ctrl.d1 = apply(ctrl.d1, ci_d1); ctrl.d2 = apply(ctrl.d2, ci_d2);
+    const DEADZONE=0.1,SENSE=2.0;const apply=(old,val)=>{let v=(Math.abs(val)>DEADZONE)?val:0;return old*0.8+Math.max(-1,Math.min(1,v*SENSE))*0.2;};
+    ctrl.y=apply(ctrl.y,ci_y);ctrl.x=apply(ctrl.x,ci_x);ctrl.d1=apply(ctrl.d1,ci_d1);ctrl.d2=apply(ctrl.d2,ci_d2);
+    const updateBar=(id,val)=>{let el=document.getElementById(`bar-${id}`),v=val*50;if(v>0){el.style.bottom='50%';el.style.top='auto';el.style.height=`${v}%`;}else{el.style.top='50%';el.style.bottom='auto';el.style.height=`${-v}%`;}document.getElementById(`val-${id}`).innerText=val.toFixed(2);};
+    updateBar('y',ctrl.y);updateBar('x',ctrl.x);updateBar('d1',ctrl.d1);updateBar('d2',ctrl.d2);
 
-    const updateBar = (id, val) => {
-        let el = document.getElementById(`bar-${id}`); let v = val * 50;
-        if(v > 0) { el.style.bottom='50%'; el.style.top='auto'; el.style.height=`${v}%`; } 
-        else { el.style.top='50%'; el.style.bottom='auto'; el.style.height=`${-v}%`; }
-        document.getElementById(`val-${id}`).innerText = val.toFixed(2);
-    };
-    updateBar('y', ctrl.y); updateBar('x', ctrl.x);
-    updateBar('d1', ctrl.d1); updateBar('d2', ctrl.d2);
-
-    // ФИЗИКА
-    player.angle += ctrl.x * 0.08;
-    let moveSpeed = 0.15 * ctrl.y;
-    let dx = Math.sin(player.angle) * moveSpeed, dy = -Math.cos(player.angle) * moveSpeed;
-    const hit = (tx, ty) => {
-        let gx=Math.floor(tx), gy=Math.floor(ty);
-        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true; return maze.grid[gy][gx] === 1;
-    };
-    if(!hit(player.x+dx+Math.sign(dx)*player.r, player.y)) player.x+=dx;
-    if(!hit(player.x, player.y+dy+Math.sign(dy)*player.r)) player.y+=dy;
-
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.y > 0.5) {
-        ctrl.floor++; maze = new Maze(9 + ctrl.floor*2); player.x = 1.5; player.y = 1.5; player.angle = 0;
-        document.getElementById('lbl-floor').innerText = ctrl.floor;
-    }
-
-    audio.update(); render();
-    requestAnimationFrame(gameLoop);
+    player.angle+=ctrl.x*0.08;let moveSpeed=0.15*ctrl.y;let dx=Math.sin(player.angle)*moveSpeed,dy=-Math.cos(player.angle)*moveSpeed;const hit=(tx,ty)=>{let gx=Math.floor(tx),gy=Math.floor(ty);if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim)return true;return maze.grid[gy][gx]===1;};
+    if(!hit(player.x+dx+Math.sign(dx)*player.r,player.y))player.x+=dx;if(!hit(player.x,player.y+dy+Math.sign(dy)*player.r))player.y+=dy;
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)]===2&&ctrl.y>0.5){ctrl.floor++;maze=new Maze(9+ctrl.floor*2);player.x=1.5;player.y=1.5;player.angle=0;document.getElementById('lbl-floor').innerText=ctrl.floor;}
+    audio.update();render();requestAnimationFrame(gameLoop);
 }
 
-function render() {
-    const cvs = document.getElementById('gameCanvas'); const ctx = cvs.getContext('2d');
-    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
-    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
-    ctx.save();
-    ctx.translate(cvs.width/2 - player.x*cellSize, cvs.height/2 - player.y*cellSize);
-    for(let r=0; r<maze.dim; r++) for(let c=0; c<maze.dim; c++) {
-        if(maze.grid[r][c]===1){ctx.fillStyle='#1a1a20'; ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize);ctx.strokeStyle='#0f0';ctx.lineWidth=1;ctx.strokeRect(c*cellSize,r*cellSize,cellSize,cellSize);}
-        else if(maze.grid[r][c]===2){ctx.fillStyle='#0f0';ctx.beginPath();ctx.arc(c*cellSize+cellSize/2,r*cellSize+cellSize/2,cellSize/3,0,Math.PI*2);ctx.fill();}
-    }
-    ctx.restore(); ctx.save();
-    ctx.translate(cvs.width/2, cvs.height/2); ctx.rotate(player.angle);
-    ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,0,cellSize*player.r,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(0,-cellSize*player.r-10);ctx.lineTo(-10,-cellSize*player.r+5);ctx.lineTo(10,-cellSize*player.r+5);ctx.fill();
-    ctx.restore();
-}
+function render(){const cvs=document.getElementById('gameCanvas'),ctx=cvs.getContext('2d');cvs.width=window.innerWidth;cvs.height=window.innerHeight;ctx.fillStyle='#050505';ctx.fillRect(0,0,cvs.width,cvs.height);ctx.save();ctx.translate(cvs.width/2-player.x*cellSize,cvs.height/2-player.y*cellSize);for(let r=0;r<maze.dim;r++)for(let c=0;c<maze.dim;c++){if(maze.grid[r][c]===1){ctx.fillStyle='#1a1a20';ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize);ctx.strokeStyle='#0f0';ctx.lineWidth=1;ctx.strokeRect(c*cellSize,r*cellSize,cellSize,cellSize);}else if(maze.grid[r][c]===2){ctx.fillStyle='#0f0';ctx.beginPath();ctx.arc(c*cellSize+cellSize/2,r*cellSize+cellSize/2,cellSize/3,0,Math.PI*2);ctx.fill();}}ctx.restore();ctx.save();ctx.translate(cvs.width/2,cvs.height/2);ctx.rotate(player.angle);ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,0,cellSize*player.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(0,-cellSize*player.r-10);ctx.lineTo(-10,-cellSize*player.r+5);ctx.lineTo(10,-cellSize*player.r+5);ctx.fill();ctx.restore();}
 
 // === 7. BLE ===
 document.getElementById('btn-start').onclick = async () => {
@@ -310,7 +229,7 @@ document.getElementById('btn-start').onclick = async () => {
         
         btn.innerText = "CONFIGURING ADC...";
         
-        // Устанавливаем GAIN=4 (код для регистра pga=2).
+        // Устанавливаем GAIN=4 (код для регистра pga=2)
         const pga = 2; 
         const gain_val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
         
@@ -322,7 +241,7 @@ document.getElementById('btn-start').onclick = async () => {
         await cmdChar.writeValueWithoutResponse(new Uint8Array([0x05, (gain_val >> 8) & 0xFF, gain_val & 0xFF]));
         await new Promise(r => setTimeout(r, 150));
         
-        console.log("ADC Configured. Starting notifications...");
+        console.log("ADC Configured. Starting data stream...");
 
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
