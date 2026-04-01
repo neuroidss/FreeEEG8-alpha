@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Dungeon: True Python Port</title>
+    <title>Neuro Dungeon: True Port</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
-        canvas { display: block; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0f0; pointer-events: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.7); padding: 10px; border: 1px solid #0f0; pointer-events: none; }
         #overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
@@ -15,7 +15,7 @@
         }
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
-            padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer;
+            padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px;
         }
         .val { color: #fff; }
     </style>
@@ -24,20 +24,23 @@
 
 <div id="ui">
     <div>FLOOR: <span id="lbl-floor" class="val">1</span></div>
-    <div>FOCUS (Z): <span id="lbl-z" class="val">0.00</span></div>
+    <div>Z-FOCUS: <span id="lbl-z" class="val">0.00</span></div>
     <div id="lbl-status" style="color:#ff0;">SEARCHING...</div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#fff;">NEURO DUNGEON</h1>
-    <p style="color:#666;">[100% Python Physics & DSP Match]</p>
-    <button id="btn-start">INITIALIZE LINK</button>
+    <h1 style="color:#fff; text-shadow: 0 0 15px #0f0;">NEURO DUNGEON</h1>
+    <p style="color:#666; margin-bottom: 20px;">[100% Python Physics & DSP Port]</p>
+    <button id="btn-start">CONNECT BLE</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === 1. ГЕОМЕТРИЯ (Копия Python) ===
+// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+let canvas, ctx, audio;
+let isConnected = false;
+
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
@@ -47,75 +50,63 @@ const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 1
 const PINS_X = ANGLES.map(Math.cos);
 const PINS_Y = ANGLES.map(Math.sin);
 
-let ctrl = { x: 0, y: 0, z: 0, interact: false, floor: 1 };
-let isConnected = false;
+let ctrl = { x: 0, y: 0, z: 0, floor: 1, interact: false };
 
-// === 2. DSP: ФИЛЬТР + ДЕТЕКТОР ОГИБАЮЩЕЙ (Для стабильности) ===
+// === 1. DSP ФИЛЬТР С КОРРЕКТНОЙ ОГИБАЮЩЕЙ ===
 class StabilizedFilter {
     constructor() {
         this.x1=0; this.x2=0; this.y1=0; this.y2=0;
-        this.envelope = 0; // Сглаженная интенсивность
+        this.envelope = 0;
     }
     process(x) {
-        // Butterworth BP 8-25Hz @ 250Hz
+        // Butterworth 8-25Hz
         let out = 0.046 * x - 0.046 * this.x2 + 1.79 * this.y1 - 0.82 * this.y2;
         this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
-        
-        // Envelope follower (аналог torch.mean(torch.abs(f)))
-        // Постоянная времени ~100мс для плавного управления
+        // Envelope follow (усреднение как в Python буфере)
         this.envelope = this.envelope * 0.98 + Math.abs(out) * 0.02;
         return out;
     }
 }
 const channels = Array.from({length: 8}, () => new StabilizedFilter());
 
-// === 3. АУДИО (Копия Python маппинга) ===
+// === 2. АУДИО (1:1 ПОРТ МАППИНГА) ===
 class NeuroAudioPort {
     constructor() {
-        this.ctx = new AudioContext();
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         this.gainL = this.ctx.createGain();
         this.gainR = this.ctx.createGain();
         this.osc = this.ctx.createOscillator();
-        
         this.osc.type = 'sine';
-        this.osc.connect(this.gainL);
-        this.osc.connect(this.gainR);
         
-        // Раздельные каналы для ручной панорамы как в Python
         this.merger = this.ctx.createChannelMerger(2);
+        this.osc.connect(this.gainL); this.osc.connect(this.gainR);
         this.gainL.connect(this.merger, 0, 0);
         this.gainR.connect(this.merger, 0, 1);
         this.merger.connect(this.ctx.destination);
         
+        this.gainL.gain.value = 0; this.gainR.gain.value = 0;
         this.osc.start();
     }
     update() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
-        
         let r = Math.sqrt(ctrl.x**2 + ctrl.y**2);
         let vol = Math.min(0.6, r * 0.35);
-        
-        // Частота: 250 * (2.2 ** y) - ТОЧНЫЙ ПОРТ
         let freq = 250 * Math.pow(2.2, ctrl.y);
-        this.osc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.04);
-
-        // Панорама: L = 1-x, R = 1+x - ТОЧНЫЙ ПОРТ
-        let panL = Math.max(0, Math.min(1, 1.0 - ctrl.x));
-        let panR = Math.max(0, Math.min(1, 1.0 + ctrl.x));
-        
-        this.gainL.gain.setTargetAtTime(panL * vol, this.ctx.currentTime, 0.04);
-        this.gainR.gain.setTargetAtTime(panR * vol, this.ctx.currentTime, 0.04);
+        this.osc.frequency.setTargetAtTime(Math.max(40, Math.min(2000, freq)), this.ctx.currentTime, 0.04);
+        let pL = Math.max(0, Math.min(1, 1.0 - ctrl.x));
+        let pR = Math.max(0, Math.min(1, 1.0 + ctrl.x));
+        this.gainL.gain.setTargetAtTime(pL * vol, this.ctx.currentTime, 0.04);
+        this.gainR.gain.setTargetAtTime(pR * vol, this.ctx.currentTime, 0.04);
     }
 }
-let audio;
 
-// === 4. ФИЗИКА И МИР (Копия Python) ===
+// === 3. МИР И ФИЗИКА (Sliding Axes) ===
 class Maze {
     constructor(dim) {
         this.dim = dim;
         this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
         this.gen(1, 1);
-        this.grid[dim-2][dim-2] = 2;
+        this.grid[dim-2][dim-2] = 2; // Portal
     }
     gen(x, y) {
         this.grid[y][x] = 0;
@@ -135,12 +126,11 @@ const cellSize = 60;
 function gameLoop() {
     if(!isConnected) return;
 
-    // --- DSP ЦЕНТРОИД ---
+    // --- DSP ЦЕНТРОИД (как в Python) ---
     let intensities = channels.map(c => c.envelope);
     let sumInt = intensities.reduce((a,b)=>a+b, 0) + 0.001;
     let meanInt = sumInt / 8;
     let maxInt = Math.max(...intensities);
-    
     let focus = maxInt / (meanInt + 0.001);
     ctrl.z = focus;
 
@@ -150,7 +140,6 @@ function gameLoop() {
             cx += (intensities[i]/sumInt) * PINS_X[i];
             cy += (intensities[i]/sumInt) * PINS_Y[i];
         }
-        // SENSE = 15.0
         ctrl.x = Math.max(-1, Math.min(1, cx * 15.0));
         ctrl.y = Math.max(-1, Math.min(1, cy * 15.0));
         ctrl.interact = (focus > 1.8);
@@ -158,7 +147,7 @@ function gameLoop() {
         ctrl.x *= 0.7; ctrl.y *= 0.7; ctrl.interact = false;
     }
 
-    // --- ФИЗИКА (Sliding Axes) ---
+    // --- ФИЗИКА (Sliding Axes Port) ---
     let speed = 0.12;
     let vx = ctrl.x * speed;
     let vy = ctrl.y * speed;
@@ -182,7 +171,7 @@ function gameLoop() {
             document.getElementById('lbl-floor').innerText = ctrl.floor;
         }
     } else {
-        document.getElementById('lbl-status').innerText = "STATIONARY";
+        document.getElementById('lbl-status').innerText = "EXPLORING...";
     }
 
     document.getElementById('lbl-z').innerText = focus.toFixed(2);
@@ -192,13 +181,11 @@ function gameLoop() {
 }
 
 function render() {
-    const cvs = document.getElementById('gameCanvas');
-    const ctx = cvs.getContext('2d');
-    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
-    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,canvas.width,canvas.height);
 
     ctx.save();
-    ctx.translate(cvs.width/2 - player.x*cellSize, cvs.height/2 - player.y*cellSize);
+    ctx.translate(canvas.width/2 - player.x*cellSize, canvas.height/2 - player.y*cellSize);
     for(let r=0; r<maze.dim; r++){
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) {
@@ -214,12 +201,13 @@ function render() {
     ctx.arc(player.x*cellSize, player.y*cellSize, cellSize*player.r, 0, Math.PI*2); ctx.fill();
     ctx.restore();
 
-    // Стик-дебаггер (красная точка)
+    // Стик-дебаггер в углу
     ctx.strokeStyle = '#333'; ctx.strokeRect(20, canvas.height-120, 100, 100);
     ctx.fillStyle = '#f00';
     ctx.fillRect(70 + ctrl.x*50 - 3, canvas.height-70 + ctrl.y*50 - 3, 6, 6);
 }
 
+// === 4. СТАРТ И BLE ===
 document.getElementById('btn-start').onclick = async () => {
     try {
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
@@ -247,11 +235,15 @@ document.getElementById('btn-start').onclick = async () => {
             }
         });
 
+        // Инициализация графики и звука
+        canvas = document.getElementById('gameCanvas');
+        ctx = canvas.getContext('2d');
         audio = new NeuroAudioPort();
+        
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         gameLoop();
-    } catch(e) { alert(e); }
+    } catch(e) { alert("ERROR: " + e); }
 };
 </script>
 </body>
