@@ -304,7 +304,10 @@ document.getElementById('btn-start').onclick = async () => {
         const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
         const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
-        await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22])); 
+        let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
             let b = new Uint8Array(e.target.value.buffer);
