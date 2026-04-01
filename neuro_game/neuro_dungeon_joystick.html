@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Tank: Pure 2D Stick</title>
+    <title>Neuro Tank: True 2D Stick</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -16,13 +16,12 @@
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
             padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
-            box-shadow: 0 0 15px #0f0; transition: 0.2s; pointer-events: auto;
+            box-shadow: 0 0 15px #0f0; pointer-events: auto;
         }
         button:hover { background: #0f0; color: #000; }
         .val { color: #fff; font-size: 18px; display: inline-block; width: 60px; text-align: right;}
         .stat { font-size: 16px; margin-bottom: 5px; }
         
-        /* Визуализация Стика */
         #stick-container { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 150px; height: 150px; background: rgba(0,0,0,0.8); border: 2px solid #444; border-radius: 50%; z-index: 10; pointer-events: none; }
         #stick-dot { width: 20px; height: 20px; background: #0f0; border-radius: 50%; position: absolute; top: 65px; left: 65px; transition: 0.1s ease-out; box-shadow: 0 0 10px #0f0;}
         .crosshair { position: absolute; background: #333; }
@@ -47,11 +46,8 @@
 <div id="overlay">
     <h1 style="color:#fff; text-shadow: 0 0 20px #0f0; font-size: 40px;">PURE 2D NEURO-STICK</h1>
     <p style="color:#888; font-size: 18px; max-width: 800px; line-height: 1.5;">
-        Один стик. Две оси. Никаких калибровок.<br><br>
-        Мы вычисляем <b>Направление Бегущей Волны (ciPLV)</b>:<br>
-        Волна Вперед = Едем вперед (Высокий звук).<br>
-        Волна Назад = Едем назад (Бас).<br>
-        Синхронность (нет волны) = Идеальный центр и Тишина.
+        Настоящий джойстик на разнице фазовых волн (ciPLV).<br>
+        Если волны нет (покой) — стик сам возвращается в центр.
     </p>
     <button id="btn-start">ACTIVATE BCI</button>
 </div>
@@ -59,36 +55,30 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === 1. НАСТРОЙКИ И СИММЕТРИИ ===
+// === 1. КОНФИГУРАЦИЯ (С ИСПРАВЛЕННЫМ GRP) ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+// ГРУППЫ ЭЛЕКТРОДОВ (ФИЗИЧЕСКАЯ СИММЕТРИЯ) - ЭТОТ БЛОК ПРОПАЛ!
+const GRP = {
+    R: [0, 1, 2, 3], L: [4, 5, 6, 7], // Right vs Left
+    F: [2, 3, 4, 5], B: [0, 1, 6, 7]  // Front vs Back
+};
 
 let ctrl = { x: 0, y: 0, floor: 1 };
 let isConnected = false;
 
 const BUF_SIZE = 256; 
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-
-// Группы электродов (Симметрия 10мм круга)
-const GRP_R = [0, 1, 2, 3];
-const GRP_L =[4, 5, 6, 7];
-const GRP_F =[2, 3, 4, 5];
-const GRP_B = [0, 1, 6, 7];
+let audio;
 
 // === 2. БЫСТРЫЙ FFT ===
-function reverseBits(x, n) {
-    let res = 0;
-    for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
-    return res;
-}
+function reverseBits(x, n) { let res=0; for(let i=0; (1<<i)<n; i++){res=(res<<1)|(x&1); x>>=1;} return res; }
 function fft(re, im) {
     const n = re.length;
-    for (let i = 0; i < n; i++) {
-        let j = reverseBits(i, n);
-        if (j > i) { let tr=re[i], ti=im[i]; re[i]=re[j]; im[i]=im[j]; re[j]=tr; im[j]=ti; }
-    }
+    for (let i = 0; i < n; i++) { let j = reverseBits(i, n); if (j > i) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
     for (let step = 2; step <= n; step <<= 1) {
         let half = step >> 1, theta = -2 * Math.PI / step;
         let wr = Math.cos(theta), wi = Math.sin(theta);
@@ -98,170 +88,99 @@ function fft(re, im) {
                 let i1 = i + j, i2 = i + j + half;
                 let tr = ar * re[i2] - ai * im[i2], ti = ar * im[i2] + ai * re[i2];
                 re[i2] = re[i1] - tr; im[i2] = im[i1] - ti; re[i1] += tr; im[i1] += ti;
-                let nar = ar * wr - ai * wi, nai = ar * wi + ai * wr;
-                ar = nar; ai = nai;
+                [ar, ai] = [ar * wr - ai * wi, ar * wi + ai * wr];
             }
         }
     }
 }
 
-// === 3. РАСЧЕТ ciPLV (Вектор Направления Волны) ===
-// Возвращает от -1.0 до 1.0. 
-// +1 = Волна идет от A к B. -1 = Волна идет от B к A. 0 = Нет волны.
+// === 3. РАСЧЕТ ciPLV (НАПРАВЛЕНИЕ ВОЛНЫ) ===
 function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
     let sum_re = 0, sum_im = 0, count = 0;
-    
     for (let k = binStart; k <= binEnd; k++) {
-        let reA = 0, imA = 0;
-        for (let c of grpA) { reA += spectra[c].re[k]; imA += spectra[c].im[k]; }
+        let reA = 0, imA = 0; for (let c of grpA) { reA += spectra[c].re[k]; imA += spectra[c].im[k]; }
         let magA = Math.sqrt(reA*reA + imA*imA) || 1;
-        let uA_re = reA / magA, uA_im = imA / magA;
-
-        let reB = 0, imB = 0;
-        for (let c of grpB) { reB += spectra[c].re[k]; imB += spectra[c].im[k]; }
+        let reB = 0, imB = 0; for (let c of grpB) { reB += spectra[c].re[k]; imB += spectra[c].im[k]; }
         let magB = Math.sqrt(reB*reB + imB*imB) || 1;
-        let uB_re = reB / magB, uB_im = -imB / magB; // Сопряженное
-
-        // U_A * U_B^*
-        let cross_re = uA_re * uB_re - uA_im * uB_im;
-        let cross_im = uA_re * uB_im + uA_im * uB_re;
-
-        sum_re += cross_re; sum_im += cross_im;
+        let uA_re = reA/magA, uA_im = imA/magA, uB_re = reB/magB, uB_im = -imB/magB;
+        sum_re += uA_re*uB_re - uA_im*uB_im;
+        sum_im += uA_re*uB_im + uA_im*uB_re;
         count++;
     }
-    
-    let mean_re = sum_re / count;
-    let mean_im = sum_im / count;
-    
+    let mean_re = sum_re/count, mean_im = sum_im/count;
     let denom = Math.sqrt(Math.max(0, 1.0 - mean_re*mean_re));
-    if (denom < 0.05) return 0.0; // Защита от "деления на ноль" при чистом 0-lag
-    
-    return mean_im / denom; 
+    return (denom < 0.05) ? 0.0 : mean_im / denom;
 }
 
-// === 4. АУДИО-ДВИЖОК (Тишина в центре) ===
+// === 4. АУДИО-ДВИЖОК ===
 class DroneAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // Вперед (Lead)
         this.oscFwd = this.ctx.createOscillator(); this.oscFwd.type = 'sawtooth'; this.oscFwd.frequency.value = 400;
-        this.gainFwd = this.ctx.createGain(); this.gainFwd.gain.value = 0;
-        this.panFwd = this.ctx.createStereoPanner();
+        this.gainFwd = this.ctx.createGain(); this.panFwd = this.ctx.createStereoPanner();
         this.oscFwd.connect(this.gainFwd).connect(this.panFwd).connect(this.ctx.destination);
-
-        // Назад (Bass)
+        
         this.oscBck = this.ctx.createOscillator(); this.oscBck.type = 'square'; this.oscBck.frequency.value = 60;
-        this.gainBck = this.ctx.createGain(); this.gainBck.gain.value = 0;
-        this.panBck = this.ctx.createStereoPanner();
+        this.gainBck = this.ctx.createGain(); this.panBck = this.ctx.createStereoPanner();
         this.oscBck.connect(this.gainBck).connect(this.panBck).connect(this.ctx.destination);
-
+        
+        this.gainFwd.gain.value=0; this.gainBck.gain.value=0;
         this.oscFwd.start(); this.oscBck.start();
     }
-
     update() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
-        const t = this.ctx.currentTime;
-        
-        // Y > 0 (Вперед)
-        let volFwd = Math.max(0, ctrl.y) * 0.3;
-        this.gainFwd.gain.setTargetAtTime(volFwd, t, 0.1);
-        
-        // Y < 0 (Назад)
-        let volBck = Math.max(0, -ctrl.y) * 0.5;
-        this.gainBck.gain.setTargetAtTime(volBck, t, 0.1);
-        
-        // Панорама (X)
+        const t = this.ctx.currentTime, d = 0.1;
+        let vFwd = Math.max(0, ctrl.y) * 0.3; this.gainFwd.gain.setTargetAtTime(vFwd, t, d);
+        let vBck = Math.max(0, -ctrl.y) * 0.5; this.gainBck.gain.setTargetAtTime(vBck, t, d);
         let pan = Math.max(-1, Math.min(1, ctrl.x));
-        this.panFwd.pan.setTargetAtTime(pan, t, 0.1);
-        this.panBck.pan.setTargetAtTime(pan, t, 0.1);
+        this.panFwd.pan.setTargetAtTime(pan, t, d); this.panBck.pan.setTargetAtTime(pan, t, d);
     }
 }
-let audio;
 
 // === 5. ДВИЖОК ЛАБИРИНТА ===
 class Maze {
-    constructor(dim) {
-        this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
-        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; 
-    }
+    constructor(dim) { this.dim=dim; this.grid=Array.from({length:dim},()=>Array(dim).fill(1)); this.gen(1,1); this.grid[dim-2][dim-2]=2; }
     gen(x, y) {
-        this.grid[y][x] = 0;
-        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+        this.grid[y][x] = 0; [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
             let nx=x+dx*2, ny=y+dy*2;
-            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
-                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
-            }
+            if(nx>0&&nx<this.dim-1&&ny>0&&ny<this.dim-1&&this.grid[ny][nx]===1){this.grid[y+dy][x+dx]=0; this.gen(nx,ny);}
         });
     }
 }
-let maze = new Maze(9);
-let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }; 
-const cellSize = 80;
+let maze = new Maze(11), player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }, cellSize = 80;
 
 // === 6. ИГРОВОЙ ЦИКЛ ===
 function gameLoop() {
     if(!isConnected) return;
-
-    // 1. CAR (Математический перенос минуса в центр)
+    
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
-        let mean = 0;
-        for(let c=0; c<8; c++) mean += eegBuffer[c][t];
-        mean /= 8;
-        for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - mean;
+        let m=0; for(let c=0; c<8; c++) m+=eegBuffer[c][t]; m/=8; for(let c=0; c<8; c++) centered[c][t]=eegBuffer[c][t]-m;
     }
+    let spectra =[]; for(let c=0; c<8; c++){let re=new Float32Array(centered[c]), im=new Float32Array(BUF_SIZE); fft(re,im); spectra.push({re,im});}
 
-    // 2. FFT
-    let spectra =[];
-    for(let c=0; c<8; c++) {
-        let re = new Float32Array(centered[c]), im = new Float32Array(BUF_SIZE);
-        fft(re, im);
-        spectra.push({re, im});
-    }
-
-    // 3. ВЫЧИСЛЕНИЕ ciPLV (Бета/Гамма: 18-35 Гц -> бины 18..36)
-    // F (Перед) vs B (Зад) -> Ось Y
-    let raw_y = calc_ciPLV(GRP.F, GRP.B, spectra, 18, 36); 
-    // R (Право) vs L (Лево) -> Ось X
+    let raw_y = calc_ciPLV(GRP.F, GRP.B, spectra, 18, 36);
     let raw_x = calc_ciPLV(GRP.R, GRP.L, spectra, 18, 36);
-
-    // 4. МЕРТВАЯ ЗОНА И СГЛАЖИВАНИЕ СТИКА
-    const DEADZONE = 0.15; // Игнорируем микро-волны
-    const SENSE = 2.5;     // Чувствительность
     
-    let target_y = (Math.abs(raw_y) > DEADZONE) ? raw_y * SENSE : 0;
-    let target_x = (Math.abs(raw_x) > DEADZONE) ? raw_x * SENSE : 0;
-
-    // Плавное движение стика (EMA фильтр)
+    const DEADZONE=0.15, SENSE=2.5;
+    let target_y = Math.abs(raw_y) > DEADZONE ? raw_y * SENSE : 0;
+    let target_x = Math.abs(raw_x) > DEADZONE ? raw_x * SENSE : 0;
     ctrl.y = ctrl.y * 0.85 + Math.max(-1, Math.min(1, target_y)) * 0.15;
     ctrl.x = ctrl.x * 0.85 + Math.max(-1, Math.min(1, target_x)) * 0.15;
 
-    // 5. ОБНОВЛЕНИЕ UI СТИКА
-    // 65px - это центр круга радиусом 75px (150/2) минус половина точки (10px)
-    document.getElementById('stick-dot').style.transform = `translate(${ctrl.x * 65}px, ${-ctrl.y * 65}px)`;
-    document.getElementById('lbl-y').innerText = ctrl.y.toFixed(2);
-    document.getElementById('lbl-x').innerText = ctrl.x.toFixed(2);
-
-    // 6. ФИЗИКА ИГРЫ
     player.angle += ctrl.x * 0.08;
     let moveSpeed = 0.15 * ctrl.y;
-    let dx = Math.sin(player.angle) * moveSpeed;
-    let dy = -Math.cos(player.angle) * moveSpeed;
+    let dx = Math.sin(player.angle) * moveSpeed, dy = -Math.cos(player.angle) * moveSpeed;
+    const hit=(tx,ty)=>{let gx=Math.floor(tx), gy=Math.floor(ty); if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim)return true; return maze.grid[gy][gx]===1;};
+    if(!hit(player.x+dx+Math.sign(dx)*player.r, player.y)) player.x+=dx;
+    if(!hit(player.x, player.y+dy+Math.sign(dy)*player.r)) player.y+=dy;
 
-    const hit = (tx, ty) => {
-        let gx = Math.floor(tx), gy = Math.floor(ty);
-        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
-        return maze.grid[gy][gx] === 1;
-    };
-    if(!hit(player.x + dx + Math.sign(dx)*player.r, player.y)) player.x += dx;
-    if(!hit(player.x, player.y + dy + Math.sign(dy)*player.r)) player.y += dy;
-
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.y > 0.5) {
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)]===2 && ctrl.y > 0.5) {
         ctrl.floor++; maze = new Maze(9 + ctrl.floor*2); player.x = 1.5; player.y = 1.5; player.angle = 0;
         document.getElementById('lbl-floor').innerText = ctrl.floor;
     }
-
+    
+    document.getElementById('lbl-y').innerText = ctrl.y.toFixed(2); document.getElementById('lbl-x').innerText = ctrl.x.toFixed(2);
     audio.update();
     render();
     requestAnimationFrame(gameLoop);
@@ -271,37 +190,28 @@ function render() {
     const cvs = document.getElementById('gameCanvas');
     const ctx = cvs.getContext('2d');
     cvs.width = window.innerWidth; cvs.height = window.innerHeight;
-    
     ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
-
     ctx.save();
-    ctx.translate(cvs.width/2, cvs.height/2);
-    ctx.rotate(-player.angle);
-    ctx.translate(-player.x*cellSize, -player.y*cellSize);
-    
-    for(let r=0; r<maze.dim; r++){
-        for(let c=0; c<maze.dim; c++){
-            if(maze.grid[r][c] === 1) {
-                ctx.fillStyle = '#1a1a20'; ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
-                ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
-            } else if(maze.grid[r][c] === 2) {
-                ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
-            }
-        }
+    ctx.translate(cvs.width/2-player.x*cellSize, cvs.height/2-player.y*cellSize);
+    for(let r=0; r<maze.dim; r++) for(let c=0; c<maze.dim; c++) {
+        if(maze.grid[r][c]===1) { ctx.fillStyle='#1a1a20'; ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize); ctx.strokeStyle='#0f0'; ctx.strokeRect(c*cellSize,r*cellSize,cellSize,cellSize);}
+        else if(maze.grid[r][c]===2) {ctx.fillStyle='#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2,r*cellSize+cellSize/2,cellSize/3,0,Math.PI*2); ctx.fill();}
     }
     ctx.restore();
-
     ctx.save();
-    ctx.translate(cvs.width/2, cvs.height/2);
-    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -cellSize*player.r - 10); ctx.lineTo(-10, -cellSize*player.r + 5); ctx.lineTo(10, -cellSize*player.r + 5); ctx.fill();
+    ctx.translate(cvs.width/2,cvs.height/2);
+    ctx.rotate(player.angle);
+    ctx.fillStyle='#0ff'; ctx.beginPath(); ctx.arc(0,0,cellSize*player.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(0,-cellSize*player.r-10); ctx.lineTo(-10,-cellSize*player.r+5); ctx.lineTo(10,-cellSize*player.r+5); ctx.fill();
     ctx.restore();
+    
+    document.getElementById('stick-dot').style.transform = `translate(${ctrl.x * 65}px, ${-ctrl.y * 65}px)`;
 }
 
-// === 7. BLE ===
+// === 7. BLE СТАРТ ===
 document.getElementById('btn-start').onclick = async () => {
     try {
-        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:[SERVICE_UUID] }] });
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID);
         const cmdChar = await service.getCharacteristic(CMD_UUID);
@@ -317,8 +227,7 @@ document.getElementById('btn-start').onclick = async () => {
             let b = new Uint8Array(e.target.value.buffer);
             if(b[0] === 0xA0) {
                 for(let i=0; i<8; i++) {
-                    let s = 2 + i*3;
-                    let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
+                    let s = 2 + i*3, v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
                     if(v & 0x800000) v -= 0x1000000;
                     eegBuffer[i].set(eegBuffer[i].subarray(1));
                     eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
@@ -330,7 +239,7 @@ document.getElementById('btn-start').onclick = async () => {
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         requestAnimationFrame(gameLoop);
-    } catch(e) { alert(e); }
+    } catch(e) { alert("ERROR: " + e); }
 };
 </script>
 </body>
