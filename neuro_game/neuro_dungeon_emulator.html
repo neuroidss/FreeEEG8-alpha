@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Reactor v8.5: Hybrid Emulator</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; }
+        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+        #synapse-bar { width: 100%; height: 4px; background: #111; margin: 5px 0; border: 1px solid #333; }
+        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.1s; }
+        #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #000; }
+        #pointer { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #fff; }
+        
+        .emu-controls { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; font-size: 10px; color: #888; }
+        #emu-stick { width: 100%; height: 60px; background: #111; border: 1px solid #444; position: relative; cursor: crosshair; }
+        #emu-marker { width: 6px; height: 6px; background: #f0f; position: absolute; border-radius: 50%; pointer-events: none; }
+
+        #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
+        .btn-group { display: flex; gap: 20px; }
+        button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 15px 25px; font-size: 18px; cursor: pointer; border-radius: 8px; }
+        button:hover { background: #0f0; color: #000; }
+        #data-log { position: absolute; bottom: 10px; left: 10px; font-size: 9px; color: #444; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">SOURCE: <span id="src-type" style="color:#fff">NONE</span></div>
+    <div class="stat">STABILITY:</div>
+    <div id="synapse-bar"><div id="synapse-fill"></div></div>
+    <div id="radar"><div id="pointer"></div></div>
+    
+    <div class="emu-controls" id="emu-ui" style="display:none;">
+        <div>VIRTUAL PHASE TENSOR (TOUCH)</div>
+        <div id="emu-stick"><div id="emu-marker"></div></div>
+    </div>
+</div>
+
+<div id="data-log">PACKET: -- -- -- -- -- -- -- --</div>
+
+<div id="overlay">
+    <h1 style="color:#0ff;">PHASE TENSOR v8.5</h1>
+    <p style="color:#888; max-width: 400px; font-size: 14px;">Выберите источник данных для управления реактором.</p>
+    <div class="btn-group">
+        <button id="btn-real">REAL EEG</button>
+        <button id="btn-emu" style="border-color:#f0f; color:#f0f;">EMULATOR</button>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// === 1. КОНФИГУРАЦИЯ ===
+const RADIUS = 10;
+const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
+const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
+const BUF_SIZE = 256;
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+let isEmulator = false;
+let isConnected = false;
+let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+let ctrl = { moveX: 0, moveY: 0, torque: 0 };
+let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 };
+let emuStick = { x: 0, y: 0 };
+let synapticPersistence = 0;
+
+// Массивы для Zero-GC
+const reArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+const imArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+
+// === 2. ЭМУЛЯТОР (СИНТЕЗ ДАННЫХ) ===
+// Эта функция создает честный пакет OpenBCI (33 байта)
+function generateSyntheticPacket(vx, vy) {
+    const pkt = new Uint8Array(33);
+    pkt[0] = 0xA0; // Header
+    pkt[32] = 0xC0; // Footer
+    pkt[1] = Math.floor(Date.now() / 4) % 256; // Sample counter
+
+    // Генерируем 8 каналов "шумного" сигнала с фазовым сдвигом
+    // vx/vy влияют на задержку синусоиды (фазу) в зависимости от положения электрода
+    const time = Date.now() / 1000;
+    const freq = 20; // 20Hz Beta
+    
+    for (let i = 0; i < 8; i++) {
+        // Проекция вектора смещения на положение электрода
+        const phaseShift = (ELECTRODES[i].x * vx + ELECTRODES[i].y * vy) * 0.5;
+        // Чистый сигнал + шум
+        let val = Math.sin(2 * Math.PI * freq * time + phaseShift) * 100; // 100uV
+        val += (Math.random() - 0.5) * 20; // + шум
+        
+        // Превращаем uV в 24-битное целое для пакета
+        const raw = Math.floor(val / UV_SCALE);
+        const s = 2 + i * 3;
+        pkt[s] = (raw >> 16) & 0xFF;
+        pkt[s+1] = (raw >> 8) & 0xFF;
+        pkt[s+2] = raw & 0xFF;
+    }
+    return pkt;
+}
+
+// === 3. МАТЕМАТИКА (FFT + ciPLV) ===
+function fft(re, im) {
+    const n = re.length;
+    for (let i = 0, j = 0; i < n; i++) {
+        if (j > i) [re[i], re[j]] = [re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
+        let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
+    }
+    for (let s = 2; s <= n; s <<= 1) {
+        let m = s >> 1, t = -2 * Math.PI / s;
+        let wr = Math.cos(t), wi = Math.sin(t);
+        for (let i = 0; i < n; i += s) {
+            let ar = 1, ai = 0;
+            for (let j = 0; j < m; j++) {
+                let u = i + j, v = u + m;
+                let tr = ar * re[v] - ai * im[v], ti = ar * im[v] + ai * re[v];
+                re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti;
+                [ar, ai] = [ar * wr - ai * wi, ar * wi + ai * wr];
+            }
+        }
+    }
+}
+
+function get_ciPLV(idxA, idxB) {
+    let sum_re = 0, sum_im = 0;
+    for (let k = 18; k <= 36; k++) {
+        let mA = Math.sqrt(reArr[idxA][k]**2 + imArr[idxA][k]**2) || 1e-6;
+        let mB = Math.sqrt(reArr[idxB][k]**2 + imArr[idxB][k]**2) || 1e-6;
+        let uAr = reArr[idxA][k]/mA, uAi = imArr[idxA][k]/mA;
+        let uBr = reArr[idxB][k]/mB, uBi = -imArr[idxB][k]/mB;
+        sum_re += (uAr*uBr - uAi*uBi); sum_im += (uAr*uBi + uAi*uBr);
+    }
+    let denom = Math.sqrt(Math.max(0, 1.0 - (sum_re/19)**2));
+    return denom < 0.001 ? 0 : (sum_im/19) / denom;
+}
+
+// === 4. ДВИЖОК ЛАБИРИНТА ===
+class Maze {
+    constructor(dim) { this.dim = dim; this.grid = Array.from({length:dim},()=>Array(dim).fill(1)); this.gen(1,1); this.grid[dim-2][dim-2]=2; }
+    gen(x,y){ this.grid[y][x]=0; [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx,dy])=>{let nx=x+dx*2,ny=y+dy*2; if(nx>0&&nx<this.dim-1&&ny>0&&ny<this.dim-1&&this.grid[ny][nx]===1){this.grid[y+dy][x+dx]=0; this.gen(nx,ny);}});}}
+
+// === 5. ГЛАВНЫЙ ЦИКЛ ===
+function gameLoop() {
+    if(!isConnected) return;
+
+    // Если эмулятор - вбрасываем синтетические данные в буфер
+    if(isEmulator) {
+        const pkt = generateSyntheticPacket(emuStick.x * 2, emuStick.y * 2);
+        // Показываем пакет коллеге в логе
+        document.getElementById('data-log').innerText = "VIRTUAL ADS131 PACKET: " + Array.from(pkt.slice(0, 8)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+        
+        for(let i=0; i<8; i++) {
+            let s = 2 + i*3;
+            let v = (pkt[s]<<16) | (pkt[s+1]<<8) | pkt[s+2];
+            if(v & 0x800000) v -= 0x1000000;
+            eegBuffer[i].set(eegBuffer[i].subarray(1));
+            eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
+        }
+    }
+
+    // CAR + FFT
+    for(let c=0; c<8; c++) {
+        let avg = 0; for(let i=0; i<8; i++) avg += eegBuffer[i][BUF_SIZE-1];
+        for(let t=0; t<BUF_SIZE; t++) { reArr[c][t] = eegBuffer[c][t] - avg/8; imArr[c][t] = 0; }
+        fft(reArr[c], imArr[c]);
+    }
+
+    // ciPLV Decomposition
+    let vx = 0, vy = 0, tq = 0;
+    for(let i=0; i<8; i++) {
+        for(let j=i+1; j<8; j++) {
+            let val = get_ciPLV(i, j);
+            vx += val * (ELECTRODES[j].x - ELECTRODES[i].x);
+            vy += val * (ELECTRODES[j].y - ELECTRODES[i].y);
+            tq += (val * (ELECTRODES[i].x * (ELECTRODES[j].y - ELECTRODES[i].y) - ELECTRODES[i].y * (ELECTRODES[j].x - ELECTRODES[i].x))) / 100;
+        }
+    }
+
+    // Физика (плавность)
+    const smooth = 0.94;
+    ctrl.moveX = ctrl.moveX * smooth + vx * (1-smooth);
+    ctrl.moveY = ctrl.moveY * smooth + vy * (1-smooth);
+    ctrl.torque = ctrl.torque * smooth + tq * (1-smooth);
+
+    // Stability Trace
+    let mag = Math.sqrt(vx*vx + vy*vy);
+    if(mag > 0.05) synapticPersistence = Math.min(1, synapticPersistence + 0.01);
+    else synapticPersistence *= 0.99;
+
+    // Movement Logic
+    player.angle += ctrl.torque * 0.5;
+    let dx = Math.sin(player.angle) * (-ctrl.moveY * 0.15) + Math.cos(player.angle) * (ctrl.moveX * 0.15);
+    let dy = -Math.cos(player.angle) * (-ctrl.moveY * 0.15) + Math.sin(player.angle) * (ctrl.moveX * 0.15);
+
+    const hit = (tx, ty) => maze.grid[Math.floor(ty)][Math.floor(tx)] === 1;
+    if(!hit(player.x + dx, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy)) player.y += dy;
+
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
+        maze = new Maze(maze.dim + 2); player.x = player.y = 1.5;
+        document.getElementById('lbl-floor').innerText = (maze.dim-7)/2;
+    }
+
+    // UI
+    document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
+    document.getElementById('pointer').style.left = (50 + ctrl.moveX * 40) + '%';
+    document.getElementById('pointer').style.top = (50 + ctrl.moveY * 40) + '%';
+
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    const cellSize = 80;
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.rotate(-player.angle);
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    for(let r=0; r<maze.dim; r++){
+        for(let c=0; c<maze.dim; c++){
+            if(maze.grid[r][c] === 1) {
+                ctx.fillStyle = `rgb(10, ${20 + synapticPersistence*80}, 40)`;
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+            } else if(maze.grid[r][c] === 2) {
+                ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
+            }
+        }
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+}
+
+// === 6. СОБЫТИЯ ===
+const emuArea = document.getElementById('emu-stick');
+emuArea.onmousemove = emuArea.ontouchmove = (e) => {
+    if(!isEmulator) return;
+    const rect = emuArea.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    emuStick.x = ((touch.clientX - rect.left) / rect.width - 0.5) * 2;
+    emuStick.y = ((touch.clientY - rect.top) / rect.height - 0.5) * 2;
+    document.getElementById('emu-marker').style.left = (50 + emuStick.x*50) + '%';
+    document.getElementById('emu-marker').style.top = (50 + emuStick.y*50) + '%';
+};
+
+document.getElementById('btn-real').onclick = async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let v = (b[2+i*3]<<16) | (b[3+i*3]<<8) | b[4+i*3];
+                    if(v & 0x800000) v -= 0x1000000;
+                    eegBuffer[i].set(eegBuffer[i].subarray(1));
+                    eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
+                }
+            }
+        });
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('src-type').innerText = "REAL EEG";
+        isConnected = true; maze = new Maze(9); gameLoop();
+    } catch(e) { alert(e); }
+};
+
+document.getElementById('btn-emu').onclick = () => {
+    isEmulator = true; isConnected = true;
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('emu-ui').style.display = 'block';
+    document.getElementById('src-type').innerText = "EMULATOR";
+    maze = new Maze(9); gameLoop();
+};
+</script>
+</body>
+</html>
