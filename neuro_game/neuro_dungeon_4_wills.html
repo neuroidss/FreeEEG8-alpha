@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Tank: 4 Wills Engine</title>
+    <title>Neuro Tank: Perfect Symmetry</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; }
@@ -21,11 +21,13 @@
         .val { color: #fff; font-size: 18px; }
         .stat { font-size: 16px; margin-bottom: 5px; }
         
-        /* Визуализация 4-х Воль */
-        #wills { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 40px; z-index: 5; pointer-events: none; }
-        .will-box { width: 60px; height: 100px; border: 2px solid #444; position: relative; background: #111; }
-        .will-fill { width: 100%; position: absolute; bottom: 0; left: 0; background: #0f0; transition: height 0.1s; }
-        .will-label { width: 100%; text-align: center; color: #fff; font-size: 14px; font-weight: bold; margin-top: -25px; text-shadow: 0 0 5px #000; }
+        /* Визуализация напряжений */
+        #tensions { position: absolute; bottom: 20px; right: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; z-index: 5; pointer-events: none; }
+        .t-box { width: 50px; height: 150px; background: #111; border: 2px solid #444; position: relative; }
+        .t-fill { width: 100%; position: absolute; bottom: 0; left: 0; transition: height 0.05s; }
+        .t-lbl { position: absolute; bottom: -20px; width: 100%; text-align: center; font-weight: bold; }
+        #fill-fwd { background: #0ff; } #fill-bck { background: #f0f; }
+        #fill-lft { background: #ff0; } #fill-rgt { background: #0f0; }
     </style>
 </head>
 <body>
@@ -36,18 +38,22 @@
     <div class="stat">STEER (X): <span id="lbl-steer" class="val">0.00</span></div>
 </div>
 
-<div id="wills">
-    <div><div class="will-box"><div id="w-lft" class="will-fill"></div></div><div class="will-label">LFT</div></div>
-    <div><div class="will-box"><div id="w-fwd" class="will-fill"></div></div><div class="will-label">FWD</div></div>
-    <div><div class="will-box"><div id="w-bck" class="will-fill"></div></div><div class="will-label">BCK</div></div>
-    <div><div class="will-box"><div id="w-rgt" class="will-fill"></div></div><div class="will-label">RGT</div></div>
+<!-- Индикаторы "Абсолютной" Воли -->
+<div id="tensions">
+    <div class="t-box"><div id="fill-lft" class="t-fill"></div><div class="t-lbl">LFT</div></div>
+    <div class="t-box"><div id="fill-fwd" class="t-fill"></div><div class="t-lbl">FWD</div></div>
+    <div class="t-box"><div id="fill-bck" class="t-fill"></div><div class="t-lbl">BCK</div></div>
+    <div class="t-box"><div id="fill-rgt" class="t-fill"></div><div class="t-lbl">RGT</div></div>
 </div>
 
 <div id="overlay">
     <h1 style="color:#fff; text-shadow: 0 0 15px #0f0; font-size: 40px;">THE 4 WILLS ENGINE</h1>
-    <p style="color:#888; font-size: 18px; text-align: center;">
-        Наденьте наушники. Каждая из 4-х зон имеет свой звук.<br>
-        Сфокусируйтесь на нужном направлении, чтобы выделить его из шума.
+    <p style="color:#888; font-size: 18px; text-align: center; max-width: 800px;">
+        Калибровок больше нет. Используем физическую симметрию контактов.<br><br>
+        <b>ЗВУКОВОЙ КОНФЛИКТ:</b><br>
+        Высокий тон = Вперед. Бас = Назад.<br>
+        Левое ухо = Влево. Правое ухо = Вправо.<br><br>
+        Если танк стоит, но звук громкий — ваши воли борются друг с другом. Ищите внутреннюю тишину для остановки.
     </p>
     <button id="btn-start">ACTIVATE BCI</button>
 </div>
@@ -55,79 +61,74 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === 1. НАСТРОЙКИ (4 WILLS) ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 
-const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
-const PINS_X = ANGLES.map(Math.cos);
-const PINS_Y = ANGLES.map(Math.sin);
-
 let ctrl = { drive: 0, steer: 0, floor: 1 };
 let isConnected = false;
 
-// === 2. DSP: БЕТА/ГАММА ФИЛЬТР (18-40 Hz) ===
-class HighFreqFilter {
+// === 1. DSP (БЕТА/ГАММА 18-40Hz) ===
+class BandFilter {
     constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; this.energy = 0; }
     process(x) {
+        // IIR BP 18-40Hz
         let out = 0.23 * x - 0.23 * this.x2 + 1.25 * this.y1 - 0.54 * this.y2;
         this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
-        this.energy = this.energy * 0.95 + Math.abs(out) * 0.05;
+        // Огибающая (очень быстрая реакция)
+        this.energy = this.energy * 0.90 + Math.abs(out) * 0.10;
         return out;
     }
 }
-const channels = Array.from({length: 8}, () => new HighFreqFilter());
+const channels = Array.from({length: 8}, () => new BandFilter());
 
-// === 3. АУДИО: СИНТЕЗАТОР 4 ВОЛЬ ===
-class FourWillsAudio {
+// === 2. 4-КАНАЛЬНЫЙ АУДИО СИНТЕЗАТОР ===
+class PolyAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         
-        // 4 Генератора
-        this.oscFwd = this.ctx.createOscillator(); this.oscFwd.frequency.value = 600; // Высокий
-        this.oscBck = this.ctx.createOscillator(); this.oscBck.frequency.value = 100; // Низкий
-        this.oscLft = this.ctx.createOscillator(); this.oscLft.frequency.value = 300; // Средний
-        this.oscRgt = this.ctx.createOscillator(); this.oscRgt.frequency.value = 300; // Средний
+        // 4 Осциллятора под каждую волю
+        this.oFwd = this.ctx.createOscillator(); this.oFwd.frequency.value = 500; this.oFwd.type = 'triangle';
+        this.oBck = this.ctx.createOscillator(); this.oBck.frequency.value = 80;  this.oBck.type = 'sawtooth';
+        this.oLft = this.ctx.createOscillator(); this.oLft.frequency.value = 250; this.oLft.type = 'sine';
+        this.oRgt = this.ctx.createOscillator(); this.oRgt.frequency.value = 250; this.oRgt.type = 'sine';
         
-        // 4 Регулятора громкости
-        this.gainFwd = this.ctx.createGain();
-        this.gainBck = this.ctx.createGain();
-        this.gainLft = this.ctx.createGain();
-        this.gainRgt = this.ctx.createGain();
-        
-        // Панорамирование для Лево/Право
-        this.panLft = this.ctx.createStereoPanner(); this.panLft.pan.value = -1.0;
-        this.panRgt = this.ctx.createStereoPanner(); this.panRgt.pan.value = 1.0;
+        this.gFwd = this.ctx.createGain(); this.gFwd.gain.value = 0;
+        this.gBck = this.ctx.createGain(); this.gBck.gain.value = 0;
+        this.gLft = this.ctx.createGain(); this.gLft.gain.value = 0;
+        this.gRgt = this.ctx.createGain(); this.gRgt.gain.value = 0;
+
+        // Панорамирование
+        this.pLft = this.ctx.createStereoPanner(); this.pLft.pan.value = -1.0;
+        this.pRgt = this.ctx.createStereoPanner(); this.pRgt.pan.value = 1.0;
 
         // Роутинг
-        this.oscFwd.connect(this.gainFwd).connect(this.ctx.destination);
-        this.oscBck.connect(this.gainBck).connect(this.ctx.destination);
-        this.oscLft.connect(this.gainLft).connect(this.panLft).connect(this.ctx.destination);
-        this.oscRgt.connect(this.gainRgt).connect(this.panRgt).connect(this.ctx.destination);
+        this.oFwd.connect(this.gFwd).connect(this.ctx.destination);
+        this.oBck.connect(this.gBck).connect(this.ctx.destination);
+        
+        this.oLft.connect(this.gLft).connect(this.pLft).connect(this.ctx.destination);
+        this.oRgt.connect(this.gRgt).connect(this.pRgt).connect(this.ctx.destination);
 
-        // Старт
-        [this.oscFwd, this.oscBck, this.oscLft, this.oscRgt].forEach(o => { o.type = 'sine'; o.start(); });
-        [this.gainFwd, this.gainBck, this.gainLft, this.gainRgt].forEach(g => g.gain.value = 0);
+        [this.oFwd, this.oBck, this.oLft, this.oRgt].forEach(o => o.start());
     }
 
-    update(w_fwd, w_bck, w_lft, w_rgt) {
+    update(e_fwd, e_bck, e_lft, e_rgt) {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         
-        // Превращаем веса (0.0 - 0.5) в громкость (0.0 - 0.8)
-        // Чтобы звук был реактивным, возводим в степень 1.5
-        const mapVol = (w) => Math.min(0.8, Math.pow(w * 2.0, 1.5) * 0.5);
+        // Превращаем сырую энергию в громкость. 
+        // 3.0 - коэффициент чувствительности слуха.
+        const toVol = (e) => Math.min(0.5, e * 3.0); 
 
-        this.gainFwd.gain.setTargetAtTime(mapVol(w_fwd), this.ctx.currentTime, 0.05);
-        this.gainBck.gain.setTargetAtTime(mapVol(w_bck), this.ctx.currentTime, 0.05);
-        this.gainLft.gain.setTargetAtTime(mapVol(w_lft), this.ctx.currentTime, 0.05);
-        this.gainRgt.gain.setTargetAtTime(mapVol(w_rgt), this.ctx.currentTime, 0.05);
+        this.gFwd.gain.setTargetAtTime(toVol(e_fwd), this.ctx.currentTime, 0.05);
+        this.gBck.gain.setTargetAtTime(toVol(e_bck), this.ctx.currentTime, 0.05);
+        this.gLft.gain.setTargetAtTime(toVol(e_lft), this.ctx.currentTime, 0.05);
+        this.gRgt.gain.setTargetAtTime(toVol(e_rgt), this.ctx.currentTime, 0.05);
     }
 }
 let audio;
 
-// === 4. ГЕНЕРАТОР ЛАБИРИНТА ===
+// === 3. ЛАБИРИНТ И ФИЗИКА ===
 class Maze {
     constructor(dim) {
         this.dim = dim;
@@ -150,57 +151,49 @@ let maze = new Maze(11);
 let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 }; 
 const cellSize = 80;
 
-// === 5. ИГРОВОЙ ЦИКЛ ===
 function gameLoop() {
     if(!isConnected) return;
 
-    // --- ВЫЧИСЛЕНИЕ 4-Х ВОЛЬ ---
-    let energies = channels.map(c => c.energy);
+    // --- 1. СЫРЫЕ АБСОЛЮТНЫЕ ВОЛИ (Симметрия электродов) ---
+    let e = channels.map(c => c.energy);
     
-    let w_fwd = 0, w_bck = 0, w_lft = 0, w_rgt = 0;
+    // Группировка строго по физическому расположению контактов
+    let e_rgt = (e[0] + e[1] + e[2] + e[3]) / 4.0;
+    let e_lft = (e[4] + e[5] + e[6] + e[7]) / 4.0;
+    let e_fwd = (e[2] + e[3] + e[4] + e[5]) / 4.0;
+    let e_bck = (e[0] + e[1] + e[6] + e[7]) / 4.0;
+
+    // Озвучиваем абсолютные значения!
+    audio.update(e_fwd, e_bck, e_lft, e_rgt);
+
+    // Отрисовка столбиков энергии
+    document.getElementById('fill-fwd').style.height = `${Math.min(100, e_fwd*200)}%`;
+    document.getElementById('fill-bck').style.height = `${Math.min(100, e_bck*200)}%`;
+    document.getElementById('fill-lft').style.height = `${Math.min(100, e_lft*200)}%`;
+    document.getElementById('fill-rgt').style.height = `${Math.min(100, e_rgt*200)}%`;
+
+    // --- 2. ВЫЧИСЛЕНИЕ ОСЕЙ ДЖОЙСТИКА (Разность Воль) ---
+    // Нормируем на общую энергию, чтобы получить "вектор", а не просто громкость
+    let total = e_fwd + e_bck + e_lft + e_rgt + 0.001;
     
-    for(let i=0; i<8; i++) {
-        w_fwd += energies[i] * Math.max(0, PINS_Y[i]);
-        w_bck += energies[i] * Math.max(0, -PINS_Y[i]);
-        w_rgt += energies[i] * Math.max(0, PINS_X[i]);
-        w_lft += energies[i] * Math.max(0, -PINS_X[i]);
-    }
-    
-    let total_w = w_fwd + w_bck + w_lft + w_rgt + 0.001;
-    
-    // Нормализованные воли (от 0 до ~0.5)
-    let n_fwd = w_fwd / total_w;
-    let n_bck = w_bck / total_w;
-    let n_lft = w_lft / total_w;
-    let n_rgt = w_rgt / total_w;
+    let raw_drive = (e_fwd - e_bck) / total;
+    let raw_steer = (e_rgt - e_lft) / total;
 
-    // ОБНОВЛЯЕМ ЗВУКОВОЙ ДВИЖОК 4-х ВОЛЬ
-    audio.update(n_fwd, n_bck, n_lft, n_rgt);
-
-    // ВИЗУАЛИЗАЦИЯ ВОЛИ (Столбики)
-    document.getElementById('w-fwd').style.height = `${n_fwd*250}%`;
-    document.getElementById('w-bck').style.height = `${n_bck*250}%`;
-    document.getElementById('w-lft').style.height = `${n_lft*250}%`;
-    document.getElementById('w-rgt').style.height = `${n_rgt*250}%`;
-
-    // --- ДИФФЕРЕНЦИАЛЬНАЯ ФИЗИКА ТАНКА ---
-    // Вычитаем интенции друг из друга
-    let raw_drive = n_fwd - n_bck;
-    let raw_steer = n_rgt - n_lft;
-
+    // Мертвая зона (отсекаем микро-шумы симметрии)
     const DEADZONE = 0.05;
     if (Math.abs(raw_drive) < DEADZONE) raw_drive = 0.0;
     if (Math.abs(raw_steer) < DEADZONE) raw_steer = 0.0;
 
-    const SENSE = 15.0; 
+    // Чувствительность перевода разницы в скорость
+    const SENSE = 2.5; 
+    
+    // Плавность стиков
     ctrl.drive = ctrl.drive * 0.8 + Math.max(-1, Math.min(1, raw_drive * SENSE)) * 0.2;
     ctrl.steer = ctrl.steer * 0.8 + Math.max(-1, Math.min(1, raw_steer * SENSE)) * 0.2;
 
-    // Вращение
-    let turnSpeed = 0.08;
-    player.angle += ctrl.steer * turnSpeed;
+    // --- 3. ФИЗИКА ИГРЫ ---
+    player.angle += ctrl.steer * 0.08;
 
-    // Движение вперед и назад
     let moveSpeed = 0.15 * ctrl.drive;
     let dx = Math.sin(player.angle) * moveSpeed;
     let dy = -Math.cos(player.angle) * moveSpeed;
@@ -214,14 +207,11 @@ function gameLoop() {
     if(!hit(player.x + dx + Math.sign(dx)*player.r, player.y)) player.x += dx;
     if(!hit(player.x, player.y + dy + Math.sign(dy)*player.r)) player.y += dy;
 
-    // ПОРТАЛ
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        if(ctrl.drive > 0.5) { // Газ вперед чтобы войти
-            ctrl.floor++;
-            maze = new Maze(11 + ctrl.floor*2);
-            player.x = 1.5; player.y = 1.5; player.angle = 0;
-            document.getElementById('lbl-floor').innerText = ctrl.floor;
-        }
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.drive > 0.5) {
+        ctrl.floor++;
+        maze = new Maze(11 + ctrl.floor*2);
+        player.x = 1.5; player.y = 1.5; player.angle = 0;
+        document.getElementById('lbl-floor').innerText = ctrl.floor;
     }
 
     document.getElementById('lbl-steer').innerText = ctrl.steer.toFixed(2);
@@ -267,7 +257,6 @@ function render() {
     ctx.restore();
 }
 
-// === 6. СТАРТ ===
 document.getElementById('btn-start').onclick = async () => {
     try {
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
@@ -294,7 +283,7 @@ document.getElementById('btn-start').onclick = async () => {
             }
         });
 
-        audio = new FourWillsAudio();
+        audio = new PolyAudio();
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         requestAnimationFrame(gameLoop);
