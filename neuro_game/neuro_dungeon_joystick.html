@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Tank: True 2D Stick</title>
+    <title>Neuro ciPLV: The True Phase Engine</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -16,69 +16,91 @@
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
             padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
-            box-shadow: 0 0 15px #0f0; pointer-events: auto;
+            box-shadow: 0 0 15px #0f0; transition: 0.2s; pointer-events: auto;
         }
         button:hover { background: #0f0; color: #000; }
         .val { color: #fff; font-size: 18px; display: inline-block; width: 60px; text-align: right;}
         .stat { font-size: 16px; margin-bottom: 5px; }
         
-        #stick-container { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 150px; height: 150px; background: rgba(0,0,0,0.8); border: 2px solid #444; border-radius: 50%; z-index: 10; pointer-events: none; }
-        #stick-dot { width: 20px; height: 20px; background: #0f0; border-radius: 50%; position: absolute; top: 65px; left: 65px; transition: 0.1s ease-out; box-shadow: 0 0 10px #0f0;}
-        .crosshair { position: absolute; background: #333; }
-        .v-line { width: 2px; height: 100%; left: 74px; top: 0; }
-        .h-line { width: 100%; height: 2px; left: 0; top: 74px; }
+        #symmetries { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 5; pointer-events: none; }
+        .sym-box { width: 80px; height: 150px; background: #111; border: 2px solid #444; position: relative; display: flex; align-items: center; justify-content: center;}
+        .sym-bar { width: 100%; position: absolute; left: 0; background: #0f0; transition: 0.1s; }
+        .sym-lbl { position: absolute; bottom: -25px; width: 100%; text-align: center; font-weight: bold; font-size: 12px;}
+        .sym-val { position: absolute; top: -25px; width: 100%; text-align: center; color: #fff; font-size: 14px;}
     </style>
 </head>
 <body>
 
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" class="val">1</span></div>
-    <div class="stat">X (L/R): <span id="lbl-x" class="val">0.00</span></div>
-    <div class="stat">Y (F/B): <span id="lbl-y" class="val">0.00</span></div>
 </div>
 
-<div id="stick-container">
-    <div class="crosshair v-line"></div>
-    <div class="crosshair h-line"></div>
-    <div id="stick-dot"></div>
+<div id="symmetries">
+    <!-- Столбики ciPLV (от -1 до 1, центр посередине) -->
+    <div class="sym-box">
+        <div id="bar-y" class="sym-bar" style="bottom: 50%; height: 0%;"></div>
+        <div class="sym-lbl">F/B (Y)</div><div id="val-y" class="sym-val">0.00</div>
+    </div>
+    <div class="sym-box">
+        <div id="bar-x" class="sym-bar" style="bottom: 50%; height: 0%;"></div>
+        <div class="sym-lbl">L/R (X)</div><div id="val-x" class="sym-val">0.00</div>
+    </div>
+    <div class="sym-box">
+        <div id="bar-d1" class="sym-bar" style="bottom: 50%; height: 0%;"></div>
+        <div class="sym-lbl">DIAG 1</div><div id="val-d1" class="sym-val">0.00</div>
+    </div>
+    <div class="sym-box">
+        <div id="bar-d2" class="sym-bar" style="bottom: 50%; height: 0%;"></div>
+        <div class="sym-lbl">DIAG 2</div><div id="val-d2" class="sym-val">0.00</div>
+    </div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0; font-size: 40px;">PURE 2D NEURO-STICK</h1>
+    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0; font-size: 40px;">ciPLV PHASE ENGINE</h1>
     <p style="color:#888; font-size: 18px; max-width: 800px; line-height: 1.5;">
-        Настоящий джойстик на разнице фазовых волн (ciPLV).<br>
-        Если волны нет (покой) — стик сам возвращается в центр.
+        Вычисляем Corrected Imaginary PLV по 4-м осям симметрии.<br>
+        Если волны нет (ноль или 0-lag) — <b>Абсолютная Тишина</b>.<br>
+        Оси X и Y управляют танком и инструментами.<br>
+        Диагональные оси управляют <b>Резонансом и LFO (Эффекты)</b>.
     </p>
-    <button id="btn-start">ACTIVATE BCI</button>
+    <button id="btn-start">ACTIVATE ciPLV</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === 1. КОНФИГУРАЦИЯ (С ИСПРАВЛЕННЫМ GRP) ===
+// === 1. НАСТРОЙКИ И СИММЕТРИИ ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 
-// ГРУППЫ ЭЛЕКТРОДОВ (ФИЗИЧЕСКАЯ СИММЕТРИЯ) - ЭТОТ БЛОК ПРОПАЛ!
-const GRP = {
-    R: [0, 1, 2, 3], L: [4, 5, 6, 7], // Right vs Left
-    F: [2, 3, 4, 5], B: [0, 1, 6, 7]  // Front vs Back
-};
-
-let ctrl = { x: 0, y: 0, floor: 1 };
+let ctrl = { x: 0, y: 0, d1: 0, d2: 0, floor: 1 };
 let isConnected = false;
 
 const BUF_SIZE = 256; 
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-let audio;
+
+// Группы электродов для 4-х симметрий
+const GRP = {
+    R: [0, 1, 2, 3], L:[4, 5, 6, 7], // Right vs Left (X)
+    F:[2, 3, 4, 5], B: [0, 1, 6, 7], // Front vs Back (Y)
+    TR: [1, 2, 3, 4], BL:[5, 6, 7, 0], // Diag 1
+    TL:[3, 4, 5, 6], BR: [7, 0, 1, 2]  // Diag 2
+};
 
 // === 2. БЫСТРЫЙ FFT ===
-function reverseBits(x, n) { let res=0; for(let i=0; (1<<i)<n; i++){res=(res<<1)|(x&1); x>>=1;} return res; }
+function reverseBits(x, n) {
+    let res = 0;
+    for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
+    return res;
+}
 function fft(re, im) {
     const n = re.length;
-    for (let i = 0; i < n; i++) { let j = reverseBits(i, n); if (j > i) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+    for (let i = 0; i < n; i++) {
+        let j = reverseBits(i, n);
+        if (j > i) { let tr=re[i], ti=im[i]; re[i]=re[j]; im[i]=im[j]; re[j]=tr; im[j]=ti; }
+    }
     for (let step = 2; step <= n; step <<= 1) {
         let half = step >> 1, theta = -2 * Math.PI / step;
         let wr = Math.cos(theta), wi = Math.sin(theta);
@@ -88,130 +110,186 @@ function fft(re, im) {
                 let i1 = i + j, i2 = i + j + half;
                 let tr = ar * re[i2] - ai * im[i2], ti = ar * im[i2] + ai * re[i2];
                 re[i2] = re[i1] - tr; im[i2] = im[i1] - ti; re[i1] += tr; im[i1] += ti;
-                [ar, ai] = [ar * wr - ai * wi, ar * wi + ai * wr];
+                let nar = ar * wr - ai * wi, nai = ar * wi + ai * wr;
+                ar = nar; ai = nai;
             }
         }
     }
 }
 
-// === 3. РАСЧЕТ ciPLV (НАПРАВЛЕНИЕ ВОЛНЫ) ===
+// === 3. РАСЧЕТ ciPLV (По статье) ===
 function calc_ciPLV(grpA, grpB, spectra, binStart, binEnd) {
     let sum_re = 0, sum_im = 0, count = 0;
+    
     for (let k = binStart; k <= binEnd; k++) {
-        let reA = 0, imA = 0; for (let c of grpA) { reA += spectra[c].re[k]; imA += spectra[c].im[k]; }
+        let reA = 0, imA = 0;
+        for (let c of grpA) { reA += spectra[c].re[k]; imA += spectra[c].im[k]; }
         let magA = Math.sqrt(reA*reA + imA*imA) || 1;
-        let reB = 0, imB = 0; for (let c of grpB) { reB += spectra[c].re[k]; imB += spectra[c].im[k]; }
+        let uA_re = reA / magA, uA_im = imA / magA;
+
+        let reB = 0, imB = 0;
+        for (let c of grpB) { reB += spectra[c].re[k]; imB += spectra[c].im[k]; }
         let magB = Math.sqrt(reB*reB + imB*imB) || 1;
-        let uA_re = reA/magA, uA_im = imA/magA, uB_re = reB/magB, uB_im = -imB/magB;
-        sum_re += uA_re*uB_re - uA_im*uB_im;
-        sum_im += uA_re*uB_im + uA_im*uB_re;
+        let uB_re = reB / magB, uB_im = -imB / magB; 
+
+        let cross_re = uA_re * uB_re - uA_im * uB_im;
+        let cross_im = uA_re * uB_im + uA_im * uB_re;
+
+        sum_re += cross_re; sum_im += cross_im;
         count++;
     }
-    let mean_re = sum_re/count, mean_im = sum_im/count;
+    
+    let mean_re = sum_re / count;
+    let mean_im = sum_im / count;
+    
     let denom = Math.sqrt(Math.max(0, 1.0 - mean_re*mean_re));
-    return (denom < 0.05) ? 0.0 : mean_im / denom;
+    if (denom < 0.0001) return 0.0;
+    
+    return mean_im / denom;
 }
 
-// === 4. АУДИО-ДВИЖОК ===
-class DroneAudio {
+// === 4. АУДИО (Пси-синтезатор с эффектами) ===
+class ciPLVAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.oscFwd = this.ctx.createOscillator(); this.oscFwd.type = 'sawtooth'; this.oscFwd.frequency.value = 400;
-        this.gainFwd = this.ctx.createGain(); this.panFwd = this.ctx.createStereoPanner();
-        this.oscFwd.connect(this.gainFwd).connect(this.panFwd).connect(this.ctx.destination);
         
-        this.oscBck = this.ctx.createOscillator(); this.oscBck.type = 'square'; this.oscBck.frequency.value = 60;
-        this.gainBck = this.ctx.createGain(); this.panBck = this.ctx.createStereoPanner();
-        this.oscBck.connect(this.gainBck).connect(this.panBck).connect(this.ctx.destination);
-        
-        this.gainFwd.gain.value=0; this.gainBck.gain.value=0;
-        this.oscFwd.start(); this.oscBck.start();
+        this.oscLead = this.ctx.createOscillator(); this.oscLead.type = 'square'; this.oscLead.frequency.value = 440;
+        this.filtLead = this.ctx.createBiquadFilter(); this.filtLead.type = 'bandpass'; this.filtLead.Q.value = 5;
+        this.volLead = this.ctx.createGain(); this.volLead.gain.value = 0;
+        this.panLead = this.ctx.createStereoPanner();
+        this.oscLead.connect(this.filtLead).connect(this.volLead).connect(this.panLead).connect(this.ctx.destination);
+
+        this.oscBass = this.ctx.createOscillator(); this.oscBass.type = 'sawtooth'; this.oscBass.frequency.value = 55;
+        this.filtBass = this.ctx.createBiquadFilter(); this.filtBass.type = 'lowpass';
+        this.volBass = this.ctx.createGain(); this.volBass.gain.value = 0;
+        this.panBass = this.ctx.createStereoPanner();
+        this.oscBass.connect(this.filtBass).connect(this.volBass).connect(this.panBass).connect(this.ctx.destination);
+
+        this.oscLead.start(); this.oscBass.start();
     }
+
     update() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
-        const t = this.ctx.currentTime, d = 0.1;
-        let vFwd = Math.max(0, ctrl.y) * 0.3; this.gainFwd.gain.setTargetAtTime(vFwd, t, d);
-        let vBck = Math.max(0, -ctrl.y) * 0.5; this.gainBck.gain.setTargetAtTime(vBck, t, d);
-        let pan = Math.max(-1, Math.min(1, ctrl.x));
-        this.panFwd.pan.setTargetAtTime(pan, t, d); this.panBck.pan.setTargetAtTime(pan, t, d);
+        const t = this.ctx.currentTime;
+        
+        let vLead = Math.max(0, ctrl.y);
+        let vBass = Math.max(0, -ctrl.y);
+        
+        this.volLead.gain.setTargetAtTime(Math.min(0.5, vLead), t, 0.1);
+        this.volBass.gain.setTargetAtTime(Math.min(0.8, vBass), t, 0.1);
+        this.panLead.pan.setTargetAtTime(ctrl.x, t, 0.1);
+        this.panBass.pan.setTargetAtTime(ctrl.x, t, 0.1);
+
+        let acid = 5 + Math.abs(ctrl.d1) * 25;
+        this.filtLead.Q.setTargetAtTime(acid, t, 0.1);
+        this.filtLead.frequency.setTargetAtTime(440 + ctrl.d1 * 2000, t, 0.1);
+
+        let wobble = 100 + Math.abs(ctrl.d2) * 800;
+        this.filtBass.frequency.setTargetAtTime(wobble, t, 0.1);
     }
 }
+let audio;
 
 // === 5. ДВИЖОК ЛАБИРИНТА ===
 class Maze {
-    constructor(dim) { this.dim=dim; this.grid=Array.from({length:dim},()=>Array(dim).fill(1)); this.gen(1,1); this.grid[dim-2][dim-2]=2; }
+    constructor(dim) {
+        this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; 
+    }
     gen(x, y) {
-        this.grid[y][x] = 0; [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
             let nx=x+dx*2, ny=y+dy*2;
-            if(nx>0&&nx<this.dim-1&&ny>0&&ny<this.dim-1&&this.grid[ny][nx]===1){this.grid[y+dy][x+dx]=0; this.gen(nx,ny);}
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
         });
     }
 }
-let maze = new Maze(11), player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }, cellSize = 80;
+let maze = new Maze(9);
+let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }; 
+const cellSize = 80;
 
 // === 6. ИГРОВОЙ ЦИКЛ ===
 function gameLoop() {
     if(!isConnected) return;
-    
+
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
-        let m=0; for(let c=0; c<8; c++) m+=eegBuffer[c][t]; m/=8; for(let c=0; c<8; c++) centered[c][t]=eegBuffer[c][t]-m;
+        let mean = 0; for(let c=0; c<8; c++) mean += eegBuffer[c][t];
+        mean /= 8;
+        for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - mean;
     }
-    let spectra =[]; for(let c=0; c<8; c++){let re=new Float32Array(centered[c]), im=new Float32Array(BUF_SIZE); fft(re,im); spectra.push({re,im});}
 
-    let raw_y = calc_ciPLV(GRP.F, GRP.B, spectra, 18, 36);
-    let raw_x = calc_ciPLV(GRP.R, GRP.L, spectra, 18, 36);
-    
-    const DEADZONE=0.15, SENSE=2.5;
-    let target_y = Math.abs(raw_y) > DEADZONE ? raw_y * SENSE : 0;
-    let target_x = Math.abs(raw_x) > DEADZONE ? raw_x * SENSE : 0;
-    ctrl.y = ctrl.y * 0.85 + Math.max(-1, Math.min(1, target_y)) * 0.15;
-    ctrl.x = ctrl.x * 0.85 + Math.max(-1, Math.min(1, target_x)) * 0.15;
+    let spectra =[];
+    for(let c=0; c<8; c++) {
+        let re = new Float32Array(centered[c]), im = new Float32Array(BUF_SIZE);
+        fft(re, im); spectra.push({re, im});
+    }
+
+    let b1=18, b2=36;
+    let ci_y = calc_ciPLV(GRP.F, GRP.B, spectra, b1, b2);
+    let ci_x = calc_ciPLV(GRP.R, GRP.L, spectra, b1, b2);
+    let ci_d1 = calc_ciPLV(GRP.TR, GRP.BL, spectra, b1, b2);
+    let ci_d2 = calc_ciPLV(GRP.TL, GRP.BR, spectra, b1, b2);
+
+    const DEADZONE = 0.1, SENSE = 2.0; 
+    const apply = (old, val) => {
+        let v = (Math.abs(val) > DEADZONE) ? val : 0;
+        return old * 0.8 + Math.max(-1, Math.min(1, v * SENSE)) * 0.2;
+    };
+    ctrl.y = apply(ctrl.y, ci_y); ctrl.x = apply(ctrl.x, ci_x);
+    ctrl.d1 = apply(ctrl.d1, ci_d1); ctrl.d2 = apply(ctrl.d2, ci_d2);
+
+    const updateBar = (id, val) => {
+        let el = document.getElementById(`bar-${id}`); let v = val * 50;
+        if(v > 0) { el.style.bottom='50%'; el.style.top='auto'; el.style.height=`${v}%`; } 
+        else { el.style.top='50%'; el.style.bottom='auto'; el.style.height=`${-v}%`; }
+        document.getElementById(`val-${id}`).innerText = val.toFixed(2);
+    };
+    updateBar('y', ctrl.y); updateBar('x', ctrl.x);
+    updateBar('d1', ctrl.d1); updateBar('d2', ctrl.d2);
 
     player.angle += ctrl.x * 0.08;
     let moveSpeed = 0.15 * ctrl.y;
     let dx = Math.sin(player.angle) * moveSpeed, dy = -Math.cos(player.angle) * moveSpeed;
-    const hit=(tx,ty)=>{let gx=Math.floor(tx), gy=Math.floor(ty); if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim)return true; return maze.grid[gy][gx]===1;};
+    const hit = (tx, ty) => {
+        let gx=Math.floor(tx), gy=Math.floor(ty);
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true; return maze.grid[gy][gx] === 1;
+    };
     if(!hit(player.x+dx+Math.sign(dx)*player.r, player.y)) player.x+=dx;
     if(!hit(player.x, player.y+dy+Math.sign(dy)*player.r)) player.y+=dy;
 
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)]===2 && ctrl.y > 0.5) {
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.y > 0.5) {
         ctrl.floor++; maze = new Maze(9 + ctrl.floor*2); player.x = 1.5; player.y = 1.5; player.angle = 0;
         document.getElementById('lbl-floor').innerText = ctrl.floor;
     }
-    
-    document.getElementById('lbl-y').innerText = ctrl.y.toFixed(2); document.getElementById('lbl-x').innerText = ctrl.x.toFixed(2);
-    audio.update();
-    render();
+
+    audio.update(); render();
     requestAnimationFrame(gameLoop);
 }
 
 function render() {
-    const cvs = document.getElementById('gameCanvas');
-    const ctx = cvs.getContext('2d');
+    const cvs = document.getElementById('gameCanvas'); const ctx = cvs.getContext('2d');
     cvs.width = window.innerWidth; cvs.height = window.innerHeight;
     ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
     ctx.save();
-    ctx.translate(cvs.width/2-player.x*cellSize, cvs.height/2-player.y*cellSize);
+    ctx.translate(cvs.width/2 - player.x*cellSize, cvs.height/2 - player.y*cellSize);
     for(let r=0; r<maze.dim; r++) for(let c=0; c<maze.dim; c++) {
-        if(maze.grid[r][c]===1) { ctx.fillStyle='#1a1a20'; ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize); ctx.strokeStyle='#0f0'; ctx.strokeRect(c*cellSize,r*cellSize,cellSize,cellSize);}
-        else if(maze.grid[r][c]===2) {ctx.fillStyle='#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2,r*cellSize+cellSize/2,cellSize/3,0,Math.PI*2); ctx.fill();}
+        if(maze.grid[r][c]===1){ctx.fillStyle='#1a1a20'; ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize);ctx.strokeStyle='#0f0';ctx.lineWidth=1;ctx.strokeRect(c*cellSize,r*cellSize,cellSize,cellSize);}
+        else if(maze.grid[r][c]===2){ctx.fillStyle='#0f0';ctx.beginPath();ctx.arc(c*cellSize+cellSize/2,r*cellSize+cellSize/2,cellSize/3,0,Math.PI*2);ctx.fill();}
     }
+    ctx.restore(); ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2); ctx.rotate(player.angle);
+    ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,0,cellSize*player.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(0,-cellSize*player.r-10);ctx.lineTo(-10,-cellSize*player.r+5);ctx.lineTo(10,-cellSize*player.r+5);ctx.fill();
     ctx.restore();
-    ctx.save();
-    ctx.translate(cvs.width/2,cvs.height/2);
-    ctx.rotate(player.angle);
-    ctx.fillStyle='#0ff'; ctx.beginPath(); ctx.arc(0,0,cellSize*player.r,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(0,-cellSize*player.r-10); ctx.lineTo(-10,-cellSize*player.r+5); ctx.lineTo(10,-cellSize*player.r+5); ctx.fill();
-    ctx.restore();
-    
-    document.getElementById('stick-dot').style.transform = `translate(${ctrl.x * 65}px, ${-ctrl.y * 65}px)`;
 }
 
-// === 7. BLE СТАРТ ===
+// === 7. BLE ===
 document.getElementById('btn-start').onclick = async () => {
     try {
-        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:[SERVICE_UUID] }] });
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID);
         const cmdChar = await service.getCharacteristic(CMD_UUID);
@@ -235,11 +313,11 @@ document.getElementById('btn-start').onclick = async () => {
             }
         });
 
-        audio = new DroneAudio();
+        audio = new ciPLVAudio();
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         requestAnimationFrame(gameLoop);
-    } catch(e) { alert("ERROR: " + e); }
+    } catch(e) { alert(e); }
 };
 </script>
 </body>
