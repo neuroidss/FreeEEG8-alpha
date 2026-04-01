@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Psytrance Dungeon</title>
+    <title>Neuro Equilibrium Tank</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
-        canvas { display: block; width: 100vw; height: 100vh; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border: 2px solid #0f0; border-radius: 8px; pointer-events: none; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border: 1px solid #0f0; border-radius: 8px; pointer-events: none; }
         #overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
@@ -16,32 +16,40 @@
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
             padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
-            box-shadow: 0 0 15px #0f0; transition: 0.2s;
+            box-shadow: 0 0 15px #0f0; transition: 0.2s; pointer-events: auto;
         }
         button:hover { background: #0f0; color: #000; }
-        .val { color: #fff; font-size: 18px; }
-        .stat { font-size: 16px; margin-bottom: 5px; text-shadow: 0 0 5px #0f0; }
+        .val { color: #fff; font-size: 16px; }
+        .stat { font-size: 14px; margin-bottom: 5px; }
+        
+        /* Нейро-Мандала UI */
+        #mandala-container { position: absolute; bottom: 20px; right: 20px; width: 200px; height: 200px; z-index: 10; background: rgba(0,0,0,0.5); border-radius: 50%; border: 1px solid #333; pointer-events: none;}
+        #mandala-canvas { width: 100%; height: 100%; }
     </style>
 </head>
 <body>
 
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" class="val">1</span></div>
-    <div class="stat">FWD/BCK (Y): <span id="lbl-y" class="val">0.00</span></div>
-    <div class="stat">LFT/RGT (X): <span id="lbl-x" class="val">0.00</span></div>
-    <div class="stat" style="color:#ff0;">CONFLICT: <span id="lbl-tension" class="val">0.00</span></div>
+    <div class="stat">DRIVE (Y): <span id="lbl-drive" class="val">0.00</span></div>
+    <div class="stat">STEER (X): <span id="lbl-steer" class="val">0.00</span></div>
+    <hr style="border-color: #333;">
+    <div class="stat" style="color:#0ff;">COHERENCE (PLV): <span id="lbl-plv" class="val">0.00</span></div>
+    <div class="stat" style="color:#ff0;">L/R PHASE DIFF: <span id="lbl-lr" class="val">0.00</span></div>
+</div>
+
+<div id="mandala-container">
+    <canvas id="mandala-canvas"></canvas>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0; font-size: 40px;">PSYTRANCE DUNGEON</h1>
-    <p style="color:#888; font-size: 18px; max-width: 700px; line-height: 1.5;">
-        В центре — ТИШИНА.<br>
-        Воля <b>Вперед</b> включает высокий Lead-синт.<br>
-        Воля <b>Назад</b> включает качающий Бас.<br>
-        Воля <b>Влево/Вправо</b> переводит музыку в нужное ухо.<br>
-        Если танк стоит, но музыка "шипит" — вы в состоянии внутреннего конфликта. Расслабьтесь.
+    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0; font-size: 40px;">EQUILIBRIUM ENGINE</h1>
+    <p style="color:#888; font-size: 18px; max-width: 800px; line-height: 1.5;">
+        <b>ПОИСК ЦЕНТРА:</b> Найдите положение, где фоновый гул звучит как единый, чистый луч. Это состояние идеальной когерентности (PLV = 1.0).<br><br>
+        <b>ДВИЖЕНИЕ:</b> Ломая симметрию (напрягая волю в сторону), вы расщепляете звук, и танк начинает движение.<br>
+        Вперед = Высокий Lead. Назад = Psy-Bass.
     </p>
-    <button id="btn-start">SYNC BRAIN & AUDIO</button>
+    <button id="btn-start">INITIALIZE MIND LINK</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -53,123 +61,111 @@ const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 
-let ctrl = { x: 0, y: 0, tension: 0, floor: 1 };
+let ctrl = { drive: 0, steer: 0, floor: 1 };
+let neuro = { plv: 0, lr_diff: 0, fb_diff: 0, theta: 0, alpha: 0 };
 let isConnected = false;
 
-// === 2. DSP (18-40 Hz Beta/Gamma) ===
-class BandpassFilter {
-    constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; this.energy=0; }
-    process(x) {
-        let out = 0.23 * x - 0.23 * this.x2 + 1.25 * this.y1 - 0.54 * this.y2;
-        this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
-        // Быстрая огибающая для мгновенной реакции
-        this.energy = this.energy * 0.92 + Math.abs(out) * 0.08;
-        return out;
+const BUF_SIZE = 256; 
+let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+
+// === 2. БЫСТРЫЙ FFT ДЛЯ ФАЗОВОГО АНАЛИЗА ===
+function reverseBits(x, n) {
+    let res = 0;
+    for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
+    return res;
+}
+function fft(re, im) {
+    const n = re.length;
+    for (let i = 0; i < n; i++) {
+        let j = reverseBits(i, n);
+        if (j > i) { let tr=re[i], ti=im[i]; re[i]=re[j]; im[i]=im[j]; re[j]=tr; im[j]=ti; }
+    }
+    for (let step = 2; step <= n; step <<= 1) {
+        let half = step >> 1, theta = -2 * Math.PI / step;
+        let wr = Math.cos(theta), wi = Math.sin(theta);
+        for (let i = 0; i < n; i += step) {
+            let ar = 1, ai = 0;
+            for (let j = 0; j < half; j++) {
+                let i1 = i + j, i2 = i + j + half;
+                let tr = ar * re[i2] - ai * im[i2], ti = ar * im[i2] + ai * re[i2];
+                re[i2] = re[i1] - tr; im[i2] = im[i1] - ti; re[i1] += tr; im[i1] += ti;
+                let nar = ar * wr - ai * wi, nai = ar * wi + ai * wr;
+                ar = nar; ai = nai;
+            }
+        }
     }
 }
-const channels = Array.from({length: 8}, () => new BandpassFilter());
 
-// === 3. PSYTRANCE АУДИО-ДВИЖОК (Web Audio API) ===
-class PsytranceEngine {
+// === 3. АУДИО: СТРУКТУРА ПОКОЯ + PSYTRANCE ===
+class EquilibriumAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         
-        // --- БАС (Движение Назад) ---
-        this.oscBass = this.ctx.createOscillator();
-        this.oscBass.type = 'sawtooth';
-        this.oscBass.frequency.value = 55; // Нота A1
+        // --- 1. IDLE DRONE (Структура Покоя) ---
+        // Два осциллятора. Разница между ними (Detune) зависит от Когерентности (PLV).
+        this.drone1 = this.ctx.createOscillator(); this.drone1.type = 'sawtooth'; this.drone1.frequency.value = 110; // A2
+        this.drone2 = this.ctx.createOscillator(); this.drone2.type = 'sawtooth'; this.drone2.frequency.value = 110;
         
-        this.filterBass = this.ctx.createBiquadFilter();
-        this.filterBass.type = 'lowpass';
-        this.filterBass.Q.value = 5;
+        this.droneFilter = this.ctx.createBiquadFilter();
+        this.droneFilter.type = 'lowpass';
+        this.droneFilter.Q.value = 2;
         
-        // LFO для создания ритма баса (140 BPM, 16-е ноты = 9.33 Hz)
-        this.lfoBass = this.ctx.createOscillator();
-        this.lfoBass.type = 'sawtooth';
-        this.lfoBass.frequency.value = 9.33;
-        this.lfoBassGain = this.ctx.createGain();
-        this.lfoBassGain.gain.value = 800; // Глубина модуляции фильтра
+        // Тета-пульсация
+        this.droneGain = this.ctx.createGain();
         
-        this.lfoBass.connect(this.lfoBassGain).connect(this.filterBass.frequency);
-        this.oscBass.connect(this.filterBass);
+        // Стерео Ширина (Фазовый конфликт L/R)
+        this.dronePanL = this.ctx.createStereoPanner(); this.dronePanL.pan.value = -0.5;
+        this.dronePanR = this.ctx.createStereoPanner(); this.dronePanR.pan.value = 0.5;
         
-        this.volBass = this.ctx.createGain();
-        this.filterBass.connect(this.volBass);
+        this.drone1.connect(this.droneFilter).connect(this.droneGain).connect(this.dronePanL).connect(this.ctx.destination);
+        this.drone2.connect(this.droneFilter).connect(this.droneGain).connect(this.dronePanR).connect(this.ctx.destination);
 
-        // --- LEAD (Движение Вперед) ---
-        this.oscLead = this.ctx.createOscillator();
-        this.oscLead.type = 'square';
-        this.oscLead.frequency.value = 440; // Нота A4
-        
-        this.filterLead = this.ctx.createBiquadFilter();
-        this.filterLead.type = 'bandpass';
-        this.filterLead.Q.value = 10;
-        
-        // LFO для Lead (Арпеджиатор эффект 140 BPM = 4.66 Hz)
-        this.lfoLead = this.ctx.createOscillator();
-        this.lfoLead.type = 'sine';
-        this.lfoLead.frequency.value = 4.66;
-        this.lfoLeadGain = this.ctx.createGain();
-        this.lfoLeadGain.gain.value = 2000;
-        
-        this.lfoLead.connect(this.lfoLeadGain).connect(this.filterLead.frequency);
-        this.oscLead.connect(this.filterLead);
-        
-        this.volLead = this.ctx.createGain();
-        this.filterLead.connect(this.volLead);
+        // --- 2. LEAD & BASS (Моторика/Движение) ---
+        this.lead = this.ctx.createOscillator(); this.lead.type = 'square'; this.lead.frequency.value = 440;
+        this.leadGain = this.ctx.createGain(); this.leadGain.gain.value = 0;
+        this.leadPan = this.ctx.createStereoPanner();
+        this.lead.connect(this.leadGain).connect(this.leadPan).connect(this.ctx.destination);
 
-        // --- CONFLICT NOISE (Напряжение) ---
-        // Создаем белый шум через AudioBuffer
-        let bufferSize = this.ctx.sampleRate * 2;
-        let noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-        let output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        
-        this.noise = this.ctx.createBufferSource();
-        this.noise.buffer = noiseBuffer;
-        this.noise.loop = true;
-        
-        this.filterNoise = this.ctx.createBiquadFilter();
-        this.filterNoise.type = 'highpass';
-        this.filterNoise.frequency.value = 2000;
-        
-        this.volNoise = this.ctx.createGain();
-        this.noise.connect(this.filterNoise).connect(this.volNoise);
+        this.bass = this.ctx.createOscillator(); this.bass.type = 'triangle'; this.bass.frequency.value = 55;
+        this.bassGain = this.ctx.createGain(); this.bassGain.gain.value = 0;
+        this.bassPan = this.ctx.createStereoPanner();
+        this.bass.connect(this.bassGain).connect(this.bassPan).connect(this.ctx.destination);
 
-        // --- ПАНОРАМА И ВЫХОД ---
-        this.panner = this.ctx.createStereoPanner();
-        this.volBass.connect(this.panner);
-        this.volLead.connect(this.panner);
-        this.volNoise.connect(this.panner);
-        this.panner.connect(this.ctx.destination);
-
-        // Инициализация
-        this.volBass.gain.value = 0;
-        this.volLead.gain.value = 0;
-        this.volNoise.gain.value = 0;
-        
-        this.oscBass.start(); this.lfoBass.start();
-        this.oscLead.start(); this.lfoLead.start();
-        this.noise.start();
+        [this.drone1, this.drone2, this.lead, this.bass].forEach(o => o.start());
     }
 
     update() {
         if(this.ctx.state === 'suspended') this.ctx.resume();
+        const t = this.ctx.currentTime;
         
-        // Y > 0 (Вперед) -> Lead Synth
-        let vLead = Math.max(0, ctrl.y);
-        this.volLead.gain.setTargetAtTime(Math.min(0.5, vLead), this.ctx.currentTime, 0.1);
+        // --- 1. ОЗВУЧКА СТРУКТУРЫ ПОКОЯ (Нейро-Акустика) ---
+        // PLV = 1.0 (Идеальный покой) -> Detune = 0
+        // PLV = 0.0 (Хаос) -> Detune = 5 Hz (Дрожание/Dissonance)
+        let detune = (1.0 - neuro.plv) * 5.0;
+        this.drone2.frequency.setTargetAtTime(110 + detune, t, 0.1);
         
-        // Y < 0 (Назад) -> Bass Synth
-        let vBass = Math.max(0, -ctrl.y);
-        this.volBass.gain.setTargetAtTime(Math.min(0.8, vBass), this.ctx.currentTime, 0.1);
+        // Фильтр открывается от Альфы (Светлеет при расслаблении)
+        let cutoff = 200 + Math.min(2000, neuro.alpha * 100);
+        this.droneFilter.frequency.setTargetAtTime(cutoff, t, 0.1);
         
-        // Конфликт -> Кислотный шум
-        this.volNoise.gain.setTargetAtTime(Math.min(0.2, ctrl.tension * 0.5), this.ctx.currentTime, 0.1);
+        // Стереобаза рвется, если полушария не в фазе
+        let width = Math.max(0, Math.min(1, neuro.lr_diff / Math.PI));
+        this.dronePanL.pan.setTargetAtTime(-width, t, 0.1);
+        this.dronePanR.pan.setTargetAtTime(width, t, 0.1);
         
-        // Панорама (Ось X)
-        let pan = Math.max(-1, Math.min(1, ctrl.x));
-        this.panner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.1);
+        // Тета модулирует громкость гула (дыхание)
+        let thetaLfo = 0.6 + 0.4 * Math.sin(2 * Math.PI * 4.0 * t); // 4Hz пульс
+        this.droneGain.gain.setTargetAtTime(0.3 * thetaLfo, t, 0.1);
+
+        // --- 2. ОЗВУЧКА ДВИЖЕНИЯ (Psytrance Drive & Steer) ---
+        let vLead = Math.max(0, ctrl.drive);
+        let vBass = Math.max(0, -ctrl.drive);
+        
+        this.leadGain.gain.setTargetAtTime(Math.min(0.5, vLead), t, 0.1);
+        this.bassGain.gain.setTargetAtTime(Math.min(0.8, vBass), t, 0.1);
+        
+        this.leadPan.pan.setTargetAtTime(ctrl.steer, t, 0.1);
+        this.bassPan.pan.setTargetAtTime(ctrl.steer, t, 0.1);
     }
 }
 let audio;
@@ -180,7 +176,7 @@ class Maze {
         this.dim = dim;
         this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
         this.gen(1, 1);
-        this.grid[dim-2][dim-2] = 2; // Portal
+        this.grid[dim-2][dim-2] = 2; 
     }
     gen(x, y) {
         this.grid[y][x] = 0;
@@ -192,67 +188,90 @@ class Maze {
         });
     }
 }
-
-let maze = new Maze(9);
-let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 }; 
+let maze = new Maze(11);
+let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 }; 
 const cellSize = 80;
 
-// === 5. ИГРОВОЙ ЦИКЛ (ИДЕАЛЬНАЯ СИММЕТРИЯ) ===
-let rawBuffer = Array.from({length: 8}, () => new Float32Array(250));
-
+// === 5. ИГРОВОЙ ЦИКЛ & DSP СТРУКТУРЫ ПОКОЯ ===
 function gameLoop() {
     if(!isConnected) return;
 
-    // 1. CAR (Сдвигаем "минус" в центр масс)
-    let centered = Array.from({length: 8}, () => new Float32Array(250));
-    for(let t=0; t<250; t++) {
+    // 1. CAR (Сдвиг референса в геометрический центр массива)
+    let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+    for(let t=0; t<BUF_SIZE; t++) {
         let mean = 0;
-        for(let c=0; c<8; c++) mean += rawBuffer[c][t];
+        for(let c=0; c<8; c++) mean += eegBuffer[c][t];
         mean /= 8;
-        for(let c=0; c<8; c++) centered[c][t] = rawBuffer[c][t] - mean;
+        for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - mean;
     }
 
-    // 2. Фильтрация и Огибающая
-    // В реальном времени мы прогоняем только последний сэмпл через IIR
-    for(let c=0; c<8; c++) channels[c].process(centered[c][249]);
-    let e = channels.map(c => c.energy);
+    // 2. FFT для всех каналов
+    let spectra =[];
+    for(let c=0; c<8; c++) {
+        let re = new Float32Array(centered[c]), im = new Float32Array(BUF_SIZE);
+        fft(re, im);
+        spectra.push({re, im});
+    }
 
-    // 3. ВЫЧИСЛЕНИЕ АБСОЛЮТНЫХ ВОЛЬ (Симметрия контактов)
-    // Право: 0, 1, 2, 3 | Лево: 4, 5, 6, 7
-    // Вперед: 2, 3, 4, 5 | Назад: 0, 1, 6, 7
-    let e_rgt = e[0] + e[1] + e[2] + e[3];
-    let e_lft = e[4] + e[5] + e[6] + e[7];
-    let e_fwd = e[2] + e[3] + e[4] + e[5];
-    let e_bck = e[0] + e[1] + e[6] + e[7];
+    // 3. АНАЛИЗ СТРУКТУРЫ (Полоса Альфа 8-13 Гц: бины 8..13)
+    let sum_re = 0, sum_im = 0, sum_mag = 0;
+    let c_re = new Float32Array(8), c_im = new Float32Array(8);
 
-    let total = e_fwd + e_bck + e_lft + e_rgt + 0.001;
+    neuro.theta = 0; neuro.alpha = 0;
+    let energies_gamma = new Float32Array(8); // Для движения (18-40Hz: бины 18..41)
 
-    // 4. ДИФФЕРЕНЦИАЛЫ (Чистые оси)
-    let raw_y = (e_fwd - e_bck) / total;
-    let raw_x = (e_rgt - e_lft) / total;
+    for(let c=0; c<8; c++) {
+        // Энергии для визуализации и моторики
+        for(let b=4; b<=8; b++) neuro.theta += Math.sqrt(spectra[c].re[b]**2 + spectra[c].im[b]**2);
+        for(let b=18; b<=41; b++) energies_gamma[c] += Math.sqrt(spectra[c].re[b]**2 + spectra[c].im[b]**2);
 
-    // 5. ВЫЧИСЛЕНИЕ КОНФЛИКТА
-    // Если мы давим и вперед и назад одновременно, overlap будет высоким
-    let overlap_y = Math.min(e_fwd, e_bck) / total;
-    let overlap_x = Math.min(e_rgt, e_lft) / total;
-    ctrl.tension = overlap_x + overlap_y;
+        // Комплексный вектор Альфы для этого канала
+        let r=0, i=0;
+        for(let b=8; b<=13; b++) { r += spectra[c].re[b]; i += spectra[c].im[b]; }
+        
+        let mag = Math.sqrt(r*r + i*i);
+        neuro.alpha += mag;
+        
+        // Нормируем вектор для вычисления PLV
+        if(mag > 0) { r /= mag; i /= mag; }
+        c_re[c] = r; c_im[c] = i;
+        
+        sum_re += r; sum_im += i; sum_mag += mag;
+    }
 
-    // Мертвая зона и Сглаживание
-    const DEADZONE = 0.05;
-    const SENSE = 8.0; 
-    
-    if (Math.abs(raw_y) < DEADZONE) raw_y = 0;
-    if (Math.abs(raw_x) < DEADZONE) raw_x = 0;
+    // --- PLV (Phase Locking Value) ---
+    // Длина среднего единичного вектора. 1.0 = Идеальный синхрон (Покой)
+    neuro.plv = Math.sqrt(sum_re**2 + sum_im**2) / 8.0;
 
-    ctrl.y = ctrl.y * 0.85 + Math.max(-1, Math.min(1, raw_y * SENSE)) * 0.15;
-    ctrl.x = ctrl.x * 0.85 + Math.max(-1, Math.min(1, raw_x * SENSE)) * 0.15;
+    // --- ФАЗОВЫЕ СИММЕТРИИ (Конфликты направлений) ---
+    // Право (0,1,2,3) vs Лево (4,5,6,7)
+    let re_R = c_re[0]+c_re[1]+c_re[2]+c_re[3], im_R = c_im[0]+c_im[1]+c_im[2]+c_im[3];
+    let re_L = c_re[4]+c_re[5]+c_re[6]+c_re[7], im_L = c_im[4]+c_im[5]+c_im[6]+c_im[7];
+    let phase_R = Math.atan2(im_R, re_R);
+    let phase_L = Math.atan2(im_L, re_L);
+    // Разница фаз. 0 = синхрон. Pi = Полный рассинхрон.
+    neuro.lr_diff = Math.abs(Math.atan2(Math.sin(phase_R - phase_L), Math.cos(phase_R - phase_L)));
+
+    // --- 4. ДВИЖЕНИЕ (Газ и Руль по Гамме) ---
+    let e_rgt = energies_gamma[0]+energies_gamma[1]+energies_gamma[2]+energies_gamma[3];
+    let e_lft = energies_gamma[4]+energies_gamma[5]+energies_gamma[6]+energies_gamma[7];
+    let e_fwd = energies_gamma[2]+energies_gamma[3]+energies_gamma[4]+energies_gamma[5];
+    let e_bck = energies_gamma[0]+energies_gamma[1]+energies_gamma[6]+energies_gamma[7];
+
+    let t_g = e_fwd + e_bck + e_lft + e_rgt + 0.001;
+    let raw_drive = (e_fwd - e_bck) / t_g;
+    let raw_steer = (e_rgt - e_lft) / t_g;
+
+    const DEADZONE = 0.05; const SENSE = 12.0; 
+    if (Math.abs(raw_drive) < DEADZONE) raw_drive = 0.0;
+    if (Math.abs(raw_steer) < DEADZONE) raw_steer = 0.0;
+
+    ctrl.drive = ctrl.drive * 0.8 + Math.max(-1, Math.min(1, raw_drive * SENSE)) * 0.2;
+    ctrl.steer = ctrl.steer * 0.8 + Math.max(-1, Math.min(1, raw_steer * SENSE)) * 0.2;
 
     // --- ФИЗИКА ---
-    let turnSpeed = 0.08;
-    player.angle += ctrl.x * turnSpeed;
-
-    // Y > 0 это Вперед, Y < 0 это Назад
-    let moveSpeed = 0.15 * ctrl.y;
+    player.angle += ctrl.steer * 0.08;
+    let moveSpeed = 0.15 * ctrl.drive;
     let dx = Math.sin(player.angle) * moveSpeed;
     let dy = -Math.cos(player.angle) * moveSpeed;
 
@@ -261,32 +280,30 @@ function gameLoop() {
         if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
         return maze.grid[gy][gx] === 1;
     };
-
     if(!hit(player.x + dx + Math.sign(dx)*player.r, player.y)) player.x += dx;
     if(!hit(player.x, player.y + dy + Math.sign(dy)*player.r)) player.y += dy;
 
-    // Портал
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.y > 0.6) {
-        ctrl.floor++;
-        maze = new Maze(9 + ctrl.floor*2);
-        player.x = 1.5; player.y = 1.5; player.angle = 0;
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.drive > 0.5) {
+        ctrl.floor++; maze = new Maze(11 + ctrl.floor*2); player.x = 1.5; player.y = 1.5; player.angle = 0;
         document.getElementById('lbl-floor').innerText = ctrl.floor;
     }
 
-    document.getElementById('lbl-y').innerText = ctrl.y.toFixed(2);
-    document.getElementById('lbl-x').innerText = ctrl.x.toFixed(2);
-    document.getElementById('lbl-tension').innerText = ctrl.tension.toFixed(2);
+    // UI
+    document.getElementById('lbl-steer').innerText = ctrl.steer.toFixed(2);
+    document.getElementById('lbl-drive').innerText = ctrl.drive.toFixed(2);
+    document.getElementById('lbl-plv').innerText = neuro.plv.toFixed(3);
+    document.getElementById('lbl-lr').innerText = (neuro.lr_diff * 180 / Math.PI).toFixed(0) + '°';
 
     audio.update();
-    render();
+    drawGame();
+    drawMandala(c_re, c_im);
     requestAnimationFrame(gameLoop);
 }
 
-function render() {
+function drawGame() {
     const cvs = document.getElementById('gameCanvas');
     const ctx = cvs.getContext('2d');
     cvs.width = window.innerWidth; cvs.height = window.innerHeight;
-    
     ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
 
     ctx.save();
@@ -300,8 +317,7 @@ function render() {
                 ctx.fillStyle = '#1a1a20'; ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
                 ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             } else if(maze.grid[r][c] === 2) {
-                ctx.fillStyle = '#0f0'; ctx.beginPath();
-                ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
             }
         }
     }
@@ -309,16 +325,50 @@ function render() {
 
     ctx.save();
     ctx.translate(cvs.width/2, cvs.height/2);
-    ctx.fillStyle = '#0ff'; ctx.beginPath();
-    ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath();
-    ctx.moveTo(0, -cellSize*player.r - 10);
-    ctx.lineTo(-10, -cellSize*player.r + 5);
-    ctx.lineTo(10, -cellSize*player.r + 5); ctx.fill();
+    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -cellSize*player.r - 10); ctx.lineTo(-10, -cellSize*player.r + 5); ctx.lineTo(10, -cellSize*player.r + 5); ctx.fill();
     ctx.restore();
 }
 
-// === 6. BLE СТАРТ ===
+// === НИРВАНА-РАДАР (Визуализация Фазы и Покоя) ===
+function drawMandala(c_re, c_im) {
+    const m_cvs = document.getElementById('mandala-canvas');
+    m_cvs.width = 200; m_cvs.height = 200;
+    const ctx = m_cvs.getContext('2d');
+    ctx.clearRect(0,0,200,200);
+    
+    const cx = 100, cy = 100, r = 80;
+    
+    // Рисуем кольцо когерентности
+    ctx.strokeStyle = `rgba(0, 255, 255, ${neuro.plv})`;
+    ctx.lineWidth = 2 + neuro.plv * 5;
+    ctx.beginPath(); ctx.arc(cx, cy, r * neuro.plv, 0, Math.PI*2); ctx.stroke();
+
+    // Рисуем фазы каждого электрода
+    ctx.lineWidth = 2;
+    const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
+    
+    for(let i=0; i<8; i++) {
+        // Угол самого пина на плате
+        let px = Math.cos(ANGLES[i]); let py = Math.sin(ANGLES[i]);
+        
+        // Угол ФАЗЫ электрического сигнала на этом пине
+        let phase = Math.atan2(c_im[i], c_re[i]);
+        
+        // Длина луча зависит от того, насколько он синхронен с соседями
+        let len = r * 0.5 + r * 0.5 * Math.cos(phase); 
+        
+        ctx.strokeStyle = `hsl(${(phase + Math.PI)*57}, 100%, 50%)`; // Цвет зависит от фазы
+        ctx.beginPath();
+        ctx.moveTo(cx + px*20, cy + py*20);
+        ctx.lineTo(cx + px*len, cy + py*len);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(cx + px*r, cy + py*r, 3, 0, Math.PI*2); ctx.fill();
+    }
+}
+
 document.getElementById('btn-start').onclick = async () => {
     try {
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
@@ -341,13 +391,13 @@ document.getElementById('btn-start').onclick = async () => {
                     let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
                     if(v & 0x800000) v -= 0x1000000;
                     
-                    rawBuffer[i].set(rawBuffer[i].subarray(1));
-                    rawBuffer[i][249] = v * UV_SCALE;
+                    eegBuffer[i].set(eegBuffer[i].subarray(1));
+                    eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
                 }
             }
         });
 
-        audio = new PsytranceEngine();
+        audio = new EquilibriumAudio();
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         requestAnimationFrame(gameLoop);
