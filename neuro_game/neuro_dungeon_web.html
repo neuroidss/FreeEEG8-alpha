@@ -3,246 +3,242 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Dungeon Web: The 10mm Quest</title>
+    <title>Neuro Dungeon PRO: Sensory Loop</title>
     <style>
-        body { margin: 0; background: #050505; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
+        body { margin: 0; background: #080808; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; background: rgba(0,20,0,0.7); padding: 10px; border-radius: 5px; border: 1px solid #0f0; pointer-events: none; }
         #overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
+            background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 20;
         }
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
-            padding: 20px 40px; font-size: 20px; font-weight: bold;
-            cursor: pointer; pointer-events: auto; border-radius: 10px;
-            box-shadow: 0 0 15px #0f0;
+            padding: 20px 40px; font-size: 24px; font-weight: bold;
+            cursor: pointer; pointer-events: auto; border-radius: 50px;
+            box-shadow: 0 0 20px #0f0; transition: 0.3s;
         }
-        button:active { background: #0f0; color: #000; }
-        .stat { font-size: 18px; margin-bottom: 5px; text-shadow: 0 0 5px #0f0; }
+        button:hover { background: #0f0; color: #000; }
+        .val { color: #fff; }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <div class="stat" id="lbl-floor">FLOOR: 1</div>
-    <div class="stat" id="lbl-status">READY TO SCAN</div>
-    <div class="stat" id="lbl-focus">FOCUS: 0.00</div>
-    <div class="stat" id="lbl-loot">NEURONS: 0 / 3</div>
+    <div>FLOOR: <span id="lbl-floor" class="val">1</span></div>
+    <div>STICK: X:<span id="lbl-x" class="val">0.0</span> Y:<span id="lbl-y" class="val">0.0</span></div>
+    <div>FOCUS: <span id="lbl-z" class="val">0.0</span></div>
+    <div id="lbl-msg" style="color:#ff0; margin-top:5px;">SYSTEM READY</div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#fff; text-shadow:0 0 20px #0f0;">NEURO DUNGEON WEB</h1>
-    <p style="color:#aaa; text-align:center;">Управление: Нейро-стик (пространственное внимание)<br>Атака: Мысленный выпад | Сбор: Удержание фокуса</p>
-    <button id="btn-start">CONNECT FREEEEG8</button>
+    <h1 style="color:#fff; text-shadow:0 0 20px #0f0;">NEURO DUNGEON</h1>
+    <p style="color:#888; margin-bottom:30px;">[Silence in Center | Panorama L/R | Pitch Fwd/Back]</p>
+    <button id="btn-start">INITIALIZE LINK</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === КОНСТАНТЫ И АДРЕСА ===
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
-const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6; // Gain 4
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 
-// Геометрия 8 пинов (радиус 10мм)
-const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
-const PINS_X = ANGLES.map(Math.cos);
-const PINS_Y = ANGLES.map(Math.sin);
+// Пины 26мм
+const PINS_X = [-0.31, -0.81, 0.81, 0.31, 0.95, 0.59, -0.59, -0.95];
+const PINS_Y = [-0.95, -0.59, 0.59, 0.95, 0.31, 0.81, -0.81, -0.31];
 
-// === ГЕЙМПЛЕЙНЫЙ СТЕЙТ ===
-let ctrl = { x: 0, y: 0, z: 0, attack: false, interact: false, floor: 1, loot: 0, totalLoot: 3 };
+let ctrl = { x: 0, y: 0, z: 0, r: 0, attack: false, floor: 1 };
 let isConnected = false;
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
 
-// === ГЕНЕРАТОР ЛАБИРИНТА ===
-class Maze {
-    constructor(dim) {
-        this.dim = dim;
-        this.data = Array.from({length: dim}, () => Array(dim).fill(1));
-        this.generate(1, 1);
-        this.data[dim-2][dim-2] = 2; // Портал
-        this.lootPos = [];
-        this.spawnLoot(3);
+// === 1. ЦИФРОВАЯ ФИЛЬТРАЦИЯ (Bandpass 8-25 Hz) ===
+class Biquad {
+    constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; }
+    // Коэффициенты для 250Hz -> 8-25Hz
+    process(x) {
+        let out = 0.046 * x + 0 * this.x1 - 0.046 * this.x2 + 1.79 * this.y1 - 0.82 * this.y2;
+        this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
+        return out;
     }
-    generate(x, y) {
-        this.data[y][x] = 0;
-        const dirs = [[0,1],[0,-1],[1,0],[-1,0]].sort(() => Math.random() - 0.5);
-        for(let [dx, dy] of dirs) {
-            let nx = x + dx*2, ny = y + dy*2;
-            if(nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1 && this.data[ny][nx] === 1) {
-                this.data[y+dy][x+dx] = 0;
-                this.generate(nx, ny);
+}
+const filters = Array.from({length: 8}, () => new Biquad());
+
+// === 2. АУДИО-ДВИЖОК (Сенсорная отдача) ===
+class NeuroAudio {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.osc = this.ctx.createOscillator();
+        this.gain = this.ctx.createGain();
+        this.panner = this.ctx.createStereoPanner();
+        
+        this.osc.type = 'sawtooth';
+        this.gain.gain.value = 0;
+        
+        this.osc.connect(this.gain);
+        this.gain.connect(this.panner);
+        this.panner.connect(this.ctx.destination);
+        this.osc.start();
+    }
+    update() {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        // Частота от Y (80 - 600 Гц)
+        let f = 250 * Math.pow(2.5, ctrl.y);
+        this.osc.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.05);
+        // Панорама от X
+        this.panner.pan.setTargetAtTime(ctrl.x, this.ctx.currentTime, 0.05);
+        // Громкость от R (расстояние от центра)
+        let v = Math.min(0.3, ctrl.r * 0.5);
+        this.gain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+    }
+}
+let audio;
+
+// === 3. ИГРОВАЯ ЛОГИКА (Maze + Collision) ===
+class Dungeon {
+    constructor(size) {
+        this.size = size;
+        this.grid = Array.from({length: size}, () => Array(size).fill(1));
+        this.gen(1, 1);
+        this.grid[size-2][size-2] = 2; // Portal
+    }
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.size-1 && ny>0 && ny<this.size-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
             }
-        }
-    }
-    spawnLoot(count) {
-        for(let i=0; i<count; i++) {
-            let rx = Math.floor(Math.random()*this.dim), ry = Math.floor(Math.random()*this.dim);
-            if(this.data[ry][rx] === 0) this.data[ry][rx] = 3; // Loot
-        }
+        });
     }
 }
 
-let maze = new Maze(9);
-let player = { x: 1.5, y: 1.5, r: 0.35 };
-const cellSize = 50;
+let maze = new Dungeon(11);
+let player = { x: 1.5, y: 1.5, worldX: 1.5, worldY: 1.5 };
+const cellSize = 60;
 
-// === DSP: АНАЛИЗ МОЗГА ===
-let eegBuffer = Array.from({length: 8}, () => new Float32Array(250).fill(0));
-let lastStickX = 0, lastStickY = 0;
-
-function processEEG() {
-    // 1. Считаем энергию в каждом канале (грубая замена FFT для скорости в JS)
-    // В вебе для простоты считаем среднее абсолютное отклонение в окне
-    let intensities = eegBuffer.map(buf => {
-        let m = buf.reduce((a, b) => a + b, 0) / buf.length;
-        return buf.reduce((a, b) => a + Math.abs(b - m), 0) / buf.length;
-    });
-
-    let meanInt = intensities.reduce((a, b) => a + b, 0) / 8;
-    let maxInt = Math.max(...intensities);
+function gameLoop() {
+    if(!isConnected) return;
     
-    // ОСЬ Z (Фокус)
-    let focus = maxInt / (meanInt + 0.001);
-    ctrl.z = Math.max(0, Math.min(1, (focus - 1.1) * 2));
-    document.getElementById('lbl-focus').innerText = `FOCUS: ${ctrl.z.toFixed(2)}`;
-
-    if (ctrl.z > 0.1) {
-        // ОСИ X, Y (Центроид)
-        let cx = 0, cy = 0, sum = 0;
-        for(let i=0; i<8; i++) {
+    // 1. DSP (Центроид)
+    let intensities = filters.map((f, i) => Math.abs(f.y1));
+    let mean = intensities.reduce((a,b)=>a+b,0)/8;
+    let max = Math.max(...intensities);
+    ctrl.z = Math.max(0, (max/(mean+0.01) - 1.1) * 2);
+    
+    if(ctrl.z > 0.05) {
+        let cx=0, cy=0, sum=0;
+        for(let i=0; i<8; i++){
             cx += intensities[i] * PINS_X[i];
             cy += intensities[i] * PINS_Y[i];
             sum += intensities[i];
         }
-        cx /= sum; cy /= sum;
-        
-        let targetX = Math.max(-1, Math.min(1, cx * 10));
-        let targetY = Math.max(-1, Math.min(1, cy * 10));
-        
-        // Кинетическая атака (скорость изменения вектора)
-        let vel = Math.sqrt((targetX - lastStickX)**2 + (targetY - lastStickY)**2);
-        ctrl.attack = vel > 0.4;
-        
-        lastStickX = targetX; lastStickY = targetY;
-        ctrl.x = targetX; ctrl.y = targetY;
+        ctrl.x = (cx/sum) * 15;
+        ctrl.y = (cy/sum) * 15;
+        ctrl.r = Math.sqrt(ctrl.x**2 + ctrl.y**2);
     } else {
-        ctrl.x *= 0.8; ctrl.y *= 0.8; ctrl.attack = false;
+        ctrl.x *= 0.9; ctrl.y *= 0.9; ctrl.r *= 0.9;
     }
-}
 
-// === ИГРОВОЙ ЦИКЛ ===
-function update() {
-    if(!isConnected) return;
-    processEEG();
+    // 2. Движение и Коллизии
+    let speed = 0.1;
+    let nx = player.x + ctrl.x * speed;
+    let ny = player.y + ctrl.y * speed;
 
-    const speed = 0.1;
-    let nextX = player.x + ctrl.x * speed;
-    let nextY = player.y + ctrl.y * speed;
+    const hit = (tx, ty) => maze.grid[Math.floor(ty)][Math.floor(tx)] === 1;
+    if(!hit(nx + Math.sign(ctrl.x)*0.2, player.y)) player.x = nx;
+    if(!hit(player.x, ny + Math.sign(ctrl.y)*0.2)) player.y = ny;
 
-    // Коллизии
-    const isWall = (tx, ty) => {
-        let gx = Math.floor(tx), gy = Math.floor(ty);
-        return maze.data[gy] && maze.data[gy][gx] === 1;
-    };
-
-    if(!isWall(nextX + Math.sign(ctrl.x)*player.r, player.y)) player.x = nextX;
-    if(!isWall(player.x, nextY + Math.sign(ctrl.y)*player.r)) player.y = nextY;
-
-    // Сбор лута и Портал
-    let gx = Math.floor(player.x), gy = Math.floor(player.y);
-    let cell = maze.data[gy][gx];
-    
-    if(cell === 3 && ctrl.z > 0.7) { // Нужно сфокусироваться на клетке с лутом
-        maze.data[gy][gx] = 0;
-        ctrl.loot++;
-        document.getElementById('lbl-loot').innerText = `NEURONS: ${ctrl.loot} / ${ctrl.totalLoot}`;
-    }
-    
-    if(cell === 2 && ctrl.z > 0.85) { // Портал
+    // 3. Портал
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2 && ctrl.z > 0.8) {
         ctrl.floor++;
-        maze = new Maze(9 + ctrl.floor);
+        maze = new Dungeon(11 + ctrl.floor*2);
         player.x = 1.5; player.y = 1.5;
-        ctrl.loot = 0;
-        document.getElementById('lbl-floor').innerText = `FLOOR: ${ctrl.floor}`;
+        document.getElementById('lbl-floor').innerText = ctrl.floor;
     }
 
-    draw();
-    requestAnimationFrame(update);
+    // 4. UI & Audio
+    audio.update();
+    document.getElementById('lbl-x').innerText = ctrl.x.toFixed(1);
+    document.getElementById('lbl-y').innerText = ctrl.y.toFixed(1);
+    document.getElementById('lbl-z').innerText = ctrl.z.toFixed(2);
+    
+    render();
+    requestAnimationFrame(gameLoop);
 }
 
-function draw() {
-    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-    ctx.fillStyle = '#050505'; ctx.fillRect(0,0, canvas.width, canvas.height);
-
+function render() {
+    const cvs = document.getElementById('gameCanvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    
     ctx.save();
-    ctx.translate(canvas.width/2 - player.x*cellSize, canvas.height/2 - player.y*cellSize);
-
-    // Рисуем лабиринт
-    for(let r=0; r<maze.dim; r++) {
-        for(let c=0; c<maze.dim; c++) {
-            let val = maze.data[r][c];
-            if(val === 1) {
-                ctx.fillStyle = '#222'; ctx.fillRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
-                ctx.strokeStyle = '#444'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
-            } else if(val === 2) {
-                ctx.fillStyle = '#0f0'; ctx.beginPath();
-                ctx.arc(c*cellSize + cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2);
-                ctx.fill();
-            } else if(val === 3) {
-                ctx.fillStyle = '#ff0'; ctx.font = "20px Arial"; ctx.fillText("💎", c*cellSize+15, r*cellSize+30);
+    ctx.translate(cvs.width/2 - player.x*cellSize, cvs.height/2 - player.y*cellSize);
+    
+    for(let r=0; r<maze.size; r++) {
+        for(let c=0; c<maze.size; c++) {
+            let v = maze.grid[r][c];
+            if(v === 1) {
+                ctx.fillStyle = '#111';
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
+                ctx.strokeStyle = '#0f0'; ctx.lineWidth=0.5;
+                ctx.strokeRect(c*cellSize, r*cellSize, cellSize-2, cellSize-2);
+            } else if(v === 2) {
+                ctx.fillStyle = '#0f0'; ctx.shadowBlur=15; ctx.shadowColor='#0f0';
+                ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
             }
         }
     }
-
-    // Игрок
-    ctx.fillStyle = '#0ff'; ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
-    ctx.beginPath(); ctx.arc(player.x*cellSize, player.y*cellSize, player.r*cellSize, 0, Math.PI*2); ctx.fill();
     
-    // Атака
-    if(ctrl.attack) {
-        ctx.strokeStyle = '#f00'; ctx.lineWidth = 5; ctx.beginPath();
-        ctx.arc(player.x*cellSize, player.y*cellSize, player.r*cellSize*2, 0, Math.PI*2); ctx.stroke();
-    }
+    // Игрок (всегда в центре экрана из-за translate)
+    ctx.fillStyle = '#fff'; ctx.shadowBlur=20; ctx.shadowColor='#fff';
+    ctx.beginPath(); ctx.arc(player.x*cellSize, player.y*cellSize, 10, 0, Math.PI*2); ctx.fill();
+    
     ctx.restore();
+    
+    // Прицел нейро-стика
+    ctx.strokeStyle = 'rgba(0,255,0,0.3)';
+    ctx.strokeRect(cvs.width/2 - 50, cvs.height/2 - 50, 100, 100);
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(cvs.width/2 + ctrl.x*40 - 3, cvs.height/2 + ctrl.y*40 - 3, 6, 6);
 }
 
-// === WEB BLUETOOTH ===
+// === 4. BLUETOOTH ===
 document.getElementById('btn-start').onclick = async () => {
     try {
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID);
         
-        // Настройка АЦП (Gain 4)
+        // Setup ADC
         const cmdChar = await service.getCharacteristic(CMD_UUID);
         let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
         await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await new Promise(r => setTimeout(r, 100));
         await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
 
         const dataChar = await service.getCharacteristic(DATA_UUID);
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
-            let buf = new Uint8Array(e.target.value.buffer);
-            if(buf[0] === 0xA0) {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
                 for(let i=0; i<8; i++) {
-                    let start = 2 + i*3;
-                    let v = (buf[start]<<16) | (buf[start+1]<<8) | buf[start+2];
+                    let s = 2 + i*3;
+                    let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
                     if(v & 0x800000) v -= 0x1000000;
-                    eegBuffer[i].set(eegBuffer[i].subarray(1));
-                    eegBuffer[i][249] = v * UV_SCALE;
+                    filters[i].process(v * UV_SCALE);
                 }
             }
         });
 
+        audio = new NeuroAudio();
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
-        update();
-    } catch(e) { console.error(e); }
+        gameLoop();
+    } catch(e) { alert(e); }
 };
 </script>
 </body>
