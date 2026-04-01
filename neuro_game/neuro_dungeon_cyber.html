@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Engine: Phase Stability v5.1</title>
+    <title>Neuro Phase Engine: Balanced v5.2</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; }
@@ -11,7 +11,7 @@
         .stat { font-size: 13px; margin-bottom: 5px; display: flex; justify-content: space-between; color: #0f0; }
         .val { color: #fff; }
         #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; position: relative; }
-        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; }
+        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.2s; }
         .slider-container { margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; }
         input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
         #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #080808; }
@@ -31,24 +31,23 @@
 
     <div class="slider-container">
         <div class="stat" style="font-size: 10px;"><span>STABILITY LEVEL</span><span id="lbl-skill">0.05</span></div>
-        <input type="range" id="skill-slider" min="0.01" max="1.0" step="0.01" value="0.05">
+        <input type="range" id="skill-slider" min="0.005" max="1.0" step="0.005" value="0.05">
     </div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">PHASE CONTINUUM v5.1</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">PHASE ENGINE v5.2</h1>
     <p style="color:#888; max-width: 500px; font-size: 14px;">
-        Notch-фильтр 50/100Hz активирован.<br>
-        Начните с 0.05. Цель — Cyber (1.0).<br>
-        Удерживайте вектор для синаптического усиления.
+        Сбалансированное вращение и движение.<br>
+        Notch-фильтр 50/100Hz активен.<br>
+        Удерживайте стабильность для ускорения.
     </p>
-    <button id="btn-start">ACTIVATE LINK</button>
+    <button id="btn-start">CONNECT & SYNC</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- КОНФИГУРАЦИЯ ГЕОМЕТРИИ ---
 const RADIUS = 10; 
 const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
@@ -64,7 +63,7 @@ let ctrl = { x: 0, y: 0, torque: 0 };
 let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 };
 let maze;
 
-// --- МАТЕМАТИКА: FFT + NOTCH ---
+// --- FFT + NOTCH ---
 function fft(re, im) {
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
@@ -88,20 +87,17 @@ function fft(re, im) {
     }
 }
 
-// Notch 50Hz и 100Hz в частотной области
 function applyNotchFilters(re, im) {
     const Fs = 250;
     const n50 = Math.round(50 * BUF_SIZE / Fs);
     const n100 = Math.round(100 * BUF_SIZE / Fs);
-    
-    // Вырезаем полосу +/- 2 Гц вокруг гармоник
     for(let k = n50-2; k <= n50+2; k++) { re[k] = im[k] = 0; }
     for(let k = n100-2; k <= n100+2; k++) { re[k] = im[k] = 0; }
 }
 
 function get_ciPLV(idxA, idxB, spectra) {
     let sum_re = 0, sum_im = 0;
-    const b1 = 18, b2 = 36; // Beta 18-36Hz
+    const b1 = 18, b2 = 36; 
     for (let k = b1; k <= b2; k++) {
         let reA = spectra[idxA].re[k], imA = spectra[idxA].im[k];
         let reB = spectra[idxB].re[k], imB = spectra[idxB].im[k];
@@ -114,7 +110,7 @@ function get_ciPLV(idxA, idxB, spectra) {
     return denom < 0.001 ? 0 : mIm / denom;
 }
 
-// --- АУДИО ---
+// --- AUDIO ---
 class LowBassAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -128,7 +124,7 @@ class LowBassAudio {
         this.osc.connect(this.filter).connect(this.gain).connect(this.ctx.destination);
         this.osc.start();
     }
-    update(power, torque, stability) {
+    update(power, stability) {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const t = this.ctx.currentTime;
         let cutoff = 100 + power * 1500 * stability;
@@ -138,7 +134,6 @@ class LowBassAudio {
 }
 let audio;
 
-// --- ЛАБИРИНТ ---
 class Maze {
     constructor(dim) {
         this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
@@ -155,11 +150,10 @@ class Maze {
     }
 }
 
-// --- ЦИКЛ ОБРАБОТКИ ---
 function gameLoop() {
     if(!isConnected) return;
 
-    // 1. CAR + FFT + NOTCH
+    // 1. CAR + FFT
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
         let avg = 0; for(let c=0; c<8; c++) avg += eegBuffer[c][t];
@@ -168,12 +162,10 @@ function gameLoop() {
     }
     let spectra = centered.map(ch => {
         let re = new Float32Array(ch), im = new Float32Array(BUF_SIZE);
-        fft(re, im);
-        applyNotchFilters(re, im); // Чистим 50/100Гц
-        return {re, im};
+        fft(re, im); applyNotchFilters(re, im); return {re, im};
     });
 
-    // 2. ВЕКТОРНЫЙ ТЕНЗОР (28 пар)
+    // 2. TENSOR CALC (Balanced Torque)
     let vx = 0, vy = 0, tq = 0;
     for(let i=0; i<8; i++) {
         for(let j=i+1; j<8; j++) {
@@ -181,37 +173,37 @@ function gameLoop() {
             let dx = ELECTRODES[j].x - ELECTRODES[i].x;
             let dy = ELECTRODES[j].y - ELECTRODES[i].y;
             vx += val * dx; vy += val * dy;
-            tq += val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx);
+            // Нормализуем торк делением на радиус, чтобы не "заносило"
+            tq += (val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx)) / RADIUS;
         }
     }
 
-    // 3. СИНАПТИЧЕСКАЯ МОДЕЛЬ (Stability Check)
+    // 3. STABILITY
     let mag = Math.sqrt(vx*vx + vy*vy);
     let dot = vx * lastVector.x + vy * lastVector.y;
     let cosTheta = dot / (mag * Math.sqrt(lastVector.x**2 + lastVector.y**2) + 1e-6);
-
-    if (mag > 0.05 && cosTheta > 0.85) {
-        synapticPersistence = Math.min(1, synapticPersistence + 0.015);
-    } else {
-        synapticPersistence *= 0.98;
-    }
+    if (mag > 0.05 && cosTheta > 0.85) synapticPersistence = Math.min(1, synapticPersistence + 0.015);
+    else synapticPersistence *= 0.98;
     lastVector = {x: vx, y: vy};
 
-    // 4. ФИЗИКА ТАНКА (Скейлинг от Skill Level)
+    // 4. PHYSICS (Balanced Rotation)
+    // Угловое сглаживание теперь тоже зависит от SkillLevel
     const smooth = 0.98 - (skillLevel * 0.1); 
     ctrl.x = ctrl.x * smooth + vx * 0.1;
     ctrl.y = ctrl.y * smooth + vy * 0.1;
-    ctrl.torque = ctrl.torque * smooth + tq * 0.1;
+    // Ослабляем вращение на низких уровнях
+    ctrl.torque = ctrl.torque * (smooth * 1.01) + tq * 0.05; 
 
-    // Итоговая скорость зависит от Skill и накопленной стабильности
     let speedGain = skillLevel * (1.0 + synapticPersistence * 4.0); 
-    player.angle += ctrl.torque * 0.05 * speedGain;
-    let speed = -ctrl.y * 0.03 * speedGain;
     
+    // ПОВОРОТ: теперь множитель вращения такой же, как у движения
+    player.angle += ctrl.torque * 0.25 * speedGain; 
+    
+    let speed = -ctrl.y * 0.03 * speedGain;
     player.x += Math.sin(player.angle) * speed;
     player.y -= Math.cos(player.angle) * speed;
 
-    // Стены
+    // Walls
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 1) {
         player.x -= Math.sin(player.angle) * speed;
         player.y += Math.cos(player.angle) * speed;
@@ -222,11 +214,11 @@ function gameLoop() {
         document.getElementById('lbl-floor').innerText = (maze.dim-7)/2;
     }
 
-    // UI & Audio
+    // UI Updates
     document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
     document.getElementById('pointer').style.left = (50 + ctrl.x * 4) + '%';
     document.getElementById('pointer').style.top = (50 + ctrl.y * 4) + '%';
-    audio.update(mag, tq, synapticPersistence);
+    audio.update(mag, synapticPersistence);
     render();
     requestAnimationFrame(gameLoop);
 }
@@ -259,10 +251,9 @@ function render() {
     ctx.restore();
 }
 
-// --- КОНТРОЛЛЕРЫ ---
 document.getElementById('skill-slider').oninput = (e) => {
     skillLevel = parseFloat(e.target.value);
-    document.getElementById('lbl-skill').innerText = skillLevel.toFixed(2);
+    document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
 };
 
 document.getElementById('btn-start').onclick = async () => {
@@ -272,8 +263,7 @@ document.getElementById('btn-start').onclick = async () => {
         const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
         const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
-
-        await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22])); // PGA 4
+        await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22])); 
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
             let b = new Uint8Array(e.target.value.buffer);
