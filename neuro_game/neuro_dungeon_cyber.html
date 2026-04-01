@@ -3,22 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Phase Engine: Precision Trim</title>
+    <title>Neuro Dungeon: Phase Stick v5.4</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 220px; }
         .stat { font-size: 13px; margin-bottom: 5px; display: flex; justify-content: space-between; color: #0f0; }
-        .val { color: #fff; }
-        #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; position: relative; }
+        #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
         #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; }
-        
         .slider-box { margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; }
-        .slider-label { font-size: 10px; color: #888; margin-bottom: 2px; text-transform: uppercase; }
-        input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; margin-bottom: 10px; }
-        
+        input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
         #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #000; }
-        #pointer { width: 6px; height: 6px; background: #f0f; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #f0f; }
+        #radar::after { content: ''; position: absolute; top: 50%; left: 50%; width: 100%; height: 1px; background: rgba(255,255,255,0.1); transform: translate(-50%,-50%); }
+        #radar::before { content: ''; position: absolute; top: 50%; left: 50%; height: 100%; width: 1px; background: rgba(255,255,255,0.1); transform: translate(-50%,-50%); }
+        #pointer { width: 8px; height: 8px; background: #f0f; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #f0f; z-index: 5; }
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
         button { background: #000; color: #0f0; border: 2px solid #0f0; padding: 20px 40px; font-size: 24px; cursor: pointer; border-radius: 10px; }
     </style>
@@ -26,35 +24,28 @@
 <body>
 
 <div id="ui">
-    <div class="stat">FLOOR: <span id="lbl-floor" class="val">1</span></div>
+    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff">1</span></div>
     <div class="stat">SYNAPTIC TRACE:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
     
     <div id="radar"><div id="pointer"></div></div>
 
     <div class="slider-box">
-        <div class="slider-label">Linear Speed (Forward)</div>
-        <input type="range" id="speed-slider" min="0.001" max="0.5" step="0.001" value="0.05">
-        
-        <div class="slider-label">Rotation Sense (Spin)</div>
-        <input type="range" id="rot-slider" min="0.001" max="0.5" step="0.001" value="0.02">
-        
-        <div style="text-align: center; font-size: 11px; color: #555; margin-top: 5px;">
-            S:<span id="val-speed">0.050</span> | R:<span id="val-rot">0.020</span>
-        </div>
+        <div class="stat" style="font-size: 10px;"><span>STABILITY LEVEL</span><span id="lbl-skill">0.05</span></div>
+        <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
     </div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">PHASE TENSOR v5.3</h1>
-    <p style="color:#888; max-width: 500px; font-size: 14px;">Раздельная калибровка осей поворота и хода.</p>
-    <button id="btn-start">SYNC & START</button>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">PHASE DUNGEON v5.4</h1>
+    <p style="color:#888; font-size: 14px; max-width: 500px;">Единый фазовый стик: Y-ход, X-поворот.<br>Коллизии восстановлены.</p>
+    <button id="btn-start">CONNECT BLE</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// ГЕОМЕТРИЯ
+// ГЕОМЕТРИЯ (ТВОИ УГЛЫ)
 const RADIUS = 10; 
 const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
@@ -62,13 +53,12 @@ const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 const BUF_SIZE = 256; 
 
 let isConnected = false;
-let linearSense = 0.05;
-let rotationSense = 0.02;
+let skillLevel = 0.05;
 let synapticPersistence = 0;
-let lastVector = { x: 0, y: 0 };
+let lastRawVector = { x: 0, y: 0 };
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
-let ctrl = { x: 0, y: 0, torque: 0 };
-let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 };
+let ctrl = { x: 0, y: 0 }; // x: Turn, y: Speed
+let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 };
 let maze;
 
 // FFT + NOTCH
@@ -96,11 +86,11 @@ function fft(re, im) {
 }
 
 function applyNotchFilters(re, im) {
-    const Fs = 250;
-    const n50 = Math.round(50 * BUF_SIZE / Fs);
-    const n100 = Math.round(100 * BUF_SIZE / Fs);
-    for(let k = n50-1; k <= n50+1; k++) { re[k] = im[k] = 0; }
-    for(let k = n100-1; k <= n100+1; k++) { re[k] = im[k] = 0; }
+    const n50 = Math.round(50 * BUF_SIZE / 250);
+    const n100 = Math.round(100 * BUF_SIZE / 250);
+    for(let k of [n50, n100]) {
+        for(let i=-1; i<=1; i++) { if(re[k+i]) re[k+i]=im[k+i]=0; }
+    }
 }
 
 function get_ciPLV(idxA, idxB, spectra) {
@@ -116,29 +106,6 @@ function get_ciPLV(idxA, idxB, spectra) {
     let denom = Math.sqrt(Math.max(0, 1.0 - mRe*mRe));
     return denom < 0.001 ? 0 : mIm / denom;
 }
-
-// AUDIO
-class LowBassAudio {
-    constructor() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.osc = this.ctx.createOscillator();
-        this.osc.type = 'sawtooth'; this.osc.frequency.value = 50;
-        this.filter = this.ctx.createBiquadFilter();
-        this.filter.type = 'lowpass'; this.filter.Q.value = 8;
-        this.gain = this.ctx.createGain(); this.gain.gain.value = 0;
-        this.osc.connect(this.filter).connect(this.gain).connect(this.pan = this.ctx.createStereoPanner()).connect(this.ctx.destination);
-        this.osc.start();
-    }
-    update(vx, vy, stability) {
-        if(this.ctx.state === 'suspended') this.ctx.resume();
-        let mag = Math.sqrt(vx*vx + vy*vy);
-        const t = this.ctx.currentTime;
-        this.filter.frequency.setTargetAtTime(100 + mag * 1500 * stability, t, 0.1);
-        this.gain.gain.setTargetAtTime(Math.min(0.4, mag * 2), t, 0.1);
-        this.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, vx*4)), t, 0.1);
-    }
-}
-let audio;
 
 class Maze {
     constructor(dim) {
@@ -159,66 +126,78 @@ class Maze {
 function gameLoop() {
     if(!isConnected) return;
 
+    // CAR
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
         let avg = 0; for(let c=0; c<8; c++) avg += eegBuffer[c][t];
         avg /= 8;
         for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - avg;
     }
+
+    // FFT
     let spectra = centered.map(ch => {
         let re = new Float32Array(ch), im = new Float32Array(BUF_SIZE);
         fft(re, im); applyNotchFilters(re, im); return {re, im};
     });
 
-    let vx = 0, vy = 0, tq = 0;
+    // TENSOR STICK (vx, vy)
+    let vx = 0, vy = 0;
     for(let i=0; i<8; i++) {
         for(let j=i+1; j<8; j++) {
             let val = get_ciPLV(i, j, spectra);
-            let dx = ELECTRODES[j].x - ELECTRODES[i].x;
-            let dy = ELECTRODES[j].y - ELECTRODES[i].y;
-            vx += val * dx; vy += val * dy;
-            // Торк теперь жестко нормализован
-            tq += (val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx)) / (RADIUS * 10);
+            vx += val * (ELECTRODES[j].x - ELECTRODES[i].x);
+            vy += val * (ELECTRODES[j].y - ELECTRODES[i].y);
         }
     }
 
+    // Stability Trace
     let mag = Math.sqrt(vx*vx + vy*vy);
-    let dot = vx * lastVector.x + vy * lastVector.y;
-    let cosTheta = dot / (mag * Math.sqrt(lastVector.x**2 + lastVector.y**2) + 1e-6);
-    if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.015);
-    else synapticPersistence *= 0.98;
-    lastVector = {x: vx, y: vy};
+    let dot = vx * lastRawVector.x + vy * lastRawVector.y;
+    let cosTheta = dot / (mag * Math.sqrt(lastRawVector.x**2 + lastRawVector.y**2) + 1e-6);
+    if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.01);
+    else synapticPersistence *= 0.99;
+    lastRawVector = {x: vx, y: vy};
 
-    // ФИЗИКА С ДВУМЯ ТРИММЕРАМИ
-    const smooth = 0.95;
+    // Unified Physics
+    const smooth = 0.96;
     ctrl.x = ctrl.x * smooth + vx * (1-smooth);
     ctrl.y = ctrl.y * smooth + vy * (1-smooth);
-    ctrl.torque = ctrl.torque * smooth + tq * (1-smooth);
 
-    let boost = (1.0 + synapticPersistence * 3.0); 
+    // Модификаторы скорости от уровня киберности
+    let boost = (1.0 + synapticPersistence * 4.0);
     
-    // ВРАЩЕНИЕ (отдельная сенса)
-    player.angle += ctrl.torque * rotationSense * boost;
-    
-    // ХОД (отдельная сенса)
-    let speed = -ctrl.y * linearSense * boost;
-    player.x += Math.sin(player.angle) * speed;
-    player.y -= Math.cos(player.angle) * speed;
+    // ПОВОРОТ (Сбалансирован: vx)
+    // Коэффициент 0.015 откалиброван, чтобы танк не крутился безумно
+    player.angle += ctrl.x * skillLevel * 0.4 * boost;
 
-    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 1) {
-        player.x -= Math.sin(player.angle) * speed;
-        player.y += Math.cos(player.angle) * speed;
-    }
+    // ХОД (Y отклонение: vy)
+    let speed = -ctrl.y * skillLevel * 0.3 * boost;
+    
+    let dx = Math.sin(player.angle) * speed;
+    let dy = -Math.cos(player.angle) * speed;
+
+    // ПРАВИЛЬНЫЕ КОЛЛИЗИИ (Оригинальная логика)
+    const hit = (tx, ty) => {
+        let gx = Math.floor(tx), gy = Math.floor(ty);
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+        return maze.grid[gy][gx] === 1;
+    };
+    
+    // Проверка по осям для скольжения
+    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) player.y += dy;
+
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        maze = new Maze(maze.dim + 2); player.x = player.y = 1.5;
-        document.getElementById('lbl-floor').innerText = (maze.dim-7)/2;
+        let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
+        document.getElementById('lbl-floor').innerText = fl;
+        maze = new Maze(9 + fl*2); player.x = player.y = 1.5;
     }
 
+    // UI
     document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
     document.getElementById('pointer').style.left = (50 + ctrl.x * 4) + '%';
     document.getElementById('pointer').style.top = (50 + ctrl.y * 4) + '%';
-    
-    audio.update(vx, vy, synapticPersistence);
+
     render();
     requestAnimationFrame(gameLoop);
 }
@@ -236,8 +215,9 @@ function render() {
     for(let r=0; r<maze.dim; r++){
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) {
-                ctx.fillStyle = `rgb(0, ${20 + synapticPersistence*80}, 30)`;
+                ctx.fillStyle = `rgb(0, ${20 + synapticPersistence*80}, 40)`;
                 ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                ctx.strokeStyle = 'rgba(0,255,0,0.1)'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             } else if(maze.grid[r][c] === 2) {
                 ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
             }
@@ -251,14 +231,9 @@ function render() {
     ctx.restore();
 }
 
-// SLIDERS
-document.getElementById('speed-slider').oninput = (e) => {
-    linearSense = parseFloat(e.target.value);
-    document.getElementById('val-speed').innerText = linearSense.toFixed(3);
-};
-document.getElementById('rot-slider').oninput = (e) => {
-    rotationSense = parseFloat(e.target.value);
-    document.getElementById('val-rot').innerText = rotationSense.toFixed(3);
+document.getElementById('skill-slider').oninput = (e) => {
+    skillLevel = parseFloat(e.target.value);
+    document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
 };
 
 document.getElementById('btn-start').onclick = async () => {
@@ -281,7 +256,7 @@ document.getElementById('btn-start').onclick = async () => {
                 }
             }
         });
-        audio = new LowBassAudio(); maze = new Maze(9);
+        maze = new Maze(9);
         document.getElementById('overlay').style.display = 'none';
         isConnected = true;
         gameLoop();
