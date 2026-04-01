@@ -3,51 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Neuro Phase Continuum: Tensor Engine</title>
+    <title>Neuro Phase Engine: Skill Tuner</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border: 2px solid #0f0; border-radius: 8px; pointer-events: none; }
+        
+        #ui { 
+            position: absolute; top: 10px; left: 10px; z-index: 10; 
+            background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; 
+            border-radius: 8px; pointer-events: auto; width: 220px;
+        }
+
         #overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 20; text-align: center;
         }
+
         button {
             background: #000; color: #0f0; border: 2px solid #0f0;
             padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
-            box-shadow: 0 0 15px #0f0; transition: 0.2s; pointer-events: auto;
+            box-shadow: 0 0 15px #0f0; transition: 0.2s;
         }
         button:hover { background: #0f0; color: #000; }
-        #radar { width: 120px; height: 120px; border: 2px solid #444; border-radius: 50%; margin-top: 10px; position: relative; background: #111; }
-        #pointer { width: 8px; height: 8px; background: #f0f; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px #f0f; }
-        .stat { font-size: 14px; margin-bottom: 5px; color: #0f0; }
+
+        .stat { font-size: 14px; margin-bottom: 8px; color: #0f0; display: flex; justify-content: space-between;}
+        
+        /* Стили ползунка */
+        .slider-box { margin-top: 15px; border-top: 1px solid #333; padding-top: 10px; }
+        input[type=range] { width: 100%; cursor: pointer; accent-color: #0f0; }
+
+        #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #111; }
+        #pointer { width: 6px; height: 6px; background: #f0f; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #f0f; }
     </style>
 </head>
 <body>
 
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff">1</span></div>
-    <div class="stat">VECTOR MAG: <span id="lbl-mag" style="color:#fff">0.00</span></div>
+    
     <div id="radar"><div id="pointer"></div></div>
-    <div style="font-size: 9px; margin-top: 5px; color: #666;">BETA PHASE CONTINUUM (18-35Hz)</div>
+
+    <div class="slider-box">
+        <div class="stat" style="font-size: 11px;">
+            <span>CALM</span>
+            <span>REACTIVE LEVEL</span>
+            <span>CYBER</span>
+        </div>
+        <input type="range" id="skill-slider" min="0.05" max="1.2" step="0.05" value="0.4">
+        <div id="lbl-skill" style="text-align: center; font-size: 18px; color: #fff; margin-top: 5px;">0.40</div>
+    </div>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0;">PHASE TENSOR ENGINE</h1>
-    <p style="color:#888; font-size: 16px; max-width: 600px; line-height: 1.4;">
-        Вычисляем вектор силы на основе 28 фазовых градиентов.<br>
-        Учитывается <b>физическое расстояние</b> между электродами (10мм радиус).<br>
-        CAR фильтрация переносит референс в центр девайса.
+    <h1 style="color:#fff; text-shadow: 0 0 20px #0f0;">PHASE TENSOR v5</h1>
+    <p style="color:#888; font-size: 18px; max-width: 600px; line-height: 1.4;">
+        Тензорное поле 28 когерентностей.<br>
+        Отрегулируйте уровень реактивности под себя.
     </p>
-    <button id="btn-start">ACTIVATE SYNC</button>
+    <button id="btn-start">ACTIVATE ENGINE</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === 1. ГЕОМЕТРИЯ (ТВОИ УГЛЫ И РАДИУС) ===
-const RADIUS = 10; // мм
+// === 1. ГЕОМЕТРИЯ (ТВОИ УГЛЫ) ===
+const RADIUS = 10;
 const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
 
@@ -63,7 +84,10 @@ let ctrl = { x: 0, y: 0, torque: 0 };
 let player = { x: 1.5, y: 1.5, r: 0.35, angle: 0 };
 const cellSize = 80;
 
-// === 2. МАТЕМАТИКА (FFT) ===
+// Настройки сложности (динамические)
+let skill = 0.4;
+
+// === 2. МАТЕМАТИКА (FFT и ciPLV) ===
 function reverseBits(x, n) {
     let res = 0;
     for (let i = 0; (1 << i) < n; i++) { res = (res << 1) | (x & 1); x >>= 1; }
@@ -91,7 +115,6 @@ function fft(re, im) {
     }
 }
 
-// === 3. ciPLV (All-to-All) ===
 function get_ciPLV(idxA, idxB, spectra, b1, b2) {
     let sum_re = 0, sum_im = 0, count = 0;
     for (let k = b1; k <= b2; k++) {
@@ -110,7 +133,7 @@ function get_ciPLV(idxA, idxB, spectra, b1, b2) {
     return (denom < 0.001) ? 0 : m_im / denom;
 }
 
-// === 4. АУДИО (Bass Engine) ===
+// === 3. АУДИО (Bass Engine) ===
 class ciPLVAudio {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -130,15 +153,15 @@ class ciPLVAudio {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const t = this.ctx.currentTime;
         let mag = Math.sqrt(vx*vx + vy*vy);
-        this.filter.frequency.setTargetAtTime(80 + mag * 1800, t, 0.1);
-        this.gain.gain.setTargetAtTime(Math.min(0.5, mag * 2.5), t, 0.1);
+        this.filter.frequency.setTargetAtTime(80 + mag * 2000, t, 0.1);
+        this.gain.gain.setTargetAtTime(Math.min(0.6, mag * 2.5), t, 0.1);
         this.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, vx * 4)), t, 0.1);
-        this.osc.frequency.setTargetAtTime(50 + Math.abs(tq) * 15, t, 0.1);
+        this.osc.frequency.setTargetAtTime(50 + Math.abs(tq) * 20, t, 0.1);
     }
 }
 let audio;
 
-// === 5. MAZE ===
+// === 4. ЛАБИРИНТ ===
 class Maze {
     constructor(dim) {
         this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
@@ -156,11 +179,11 @@ class Maze {
 }
 let maze = new Maze(9);
 
-// === 6. LOOP ===
+// === 5. ЦИКЛ ИГРЫ ===
 function gameLoop() {
     if(!isConnected) return;
 
-    // CAR - Центрирование относительно среднего
+    // CAR
     let centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
     for(let t=0; t<BUF_SIZE; t++) {
         let avg = 0; for(let c=0; c<8; c++) avg += eegBuffer[c][t];
@@ -176,41 +199,37 @@ function gameLoop() {
         spectra.push({re, im});
     }
 
-    // РАСЧЕТ ТЕНЗОРА (Все пары со всеми с учетом дистанции)
+    // РАСЧЕТ ТЕНЗОРА
     let vx = 0, vy = 0, tq = 0;
     for(let i=0; i<8; i++) {
         for(let j=i+1; j<8; j++) {
-            let val = get_ciPLV(i, j, spectra, 18, 36); // Beta
-            
-            // Вектор от i к j
+            let val = get_ciPLV(i, j, spectra, 18, 36); 
             let dx = ELECTRODES[j].x - ELECTRODES[i].x;
             let dy = ELECTRODES[j].y - ELECTRODES[i].y;
-            
-            // Суммируем вклад в линейный стик (с учетом "плеча" - дистанции dx/dy)
             vx += val * dx;
             vy += val * dy;
-
-            // Торк (момент вращения): r x F
             tq += val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx);
         }
     }
 
-    // Физика (нормализация тензора)
-    const SENSE = 0.6;
-    ctrl.x = ctrl.x * 0.9 + vx * SENSE * 0.1;
-    ctrl.y = ctrl.y * 0.9 + vy * SENSE * 0.1;
-    ctrl.torque = ctrl.torque * 0.9 + tq * 0.05 * 0.1;
+    // === ДИНАМИЧЕСКАЯ ФИЗИКА ОТ ПОЛЗУНКА ===
+    // Чем меньше skill, тем больше инерция (smooth) и меньше усиление (gain)
+    let smooth = 0.99 - (skill * 0.1); // от 0.985 до 0.87
+    let gain = skill * 2.0;
 
-    // UI Radar
-    document.getElementById('pointer').style.left = (50 + ctrl.x * 3) + '%';
-    document.getElementById('pointer').style.top = (50 + ctrl.y * 3) + '%';
-    document.getElementById('lbl-mag').innerText = Math.sqrt(vx*vx + vy*vy).toFixed(2);
+    ctrl.x = ctrl.x * smooth + vx * gain * (1 - smooth);
+    ctrl.y = ctrl.y * smooth + vy * gain * (1 - smooth);
+    ctrl.torque = ctrl.torque * smooth + tq * gain * 0.05 * (1 - smooth);
 
-    // Движение
-    player.angle += ctrl.torque * 0.1;
-    let speed = -ctrl.y * 0.02; // Движение по вертикальной оси тензора
-    let dx = Math.sin(player.angle) * speed * 8;
-    let dy = -Math.cos(player.angle) * speed * 8;
+    // Радар
+    document.getElementById('pointer').style.left = (50 + ctrl.x * 5) + '%';
+    document.getElementById('pointer').style.top = (50 + ctrl.y * 5) + '%';
+
+    // Танк
+    player.angle += ctrl.torque * 0.15;
+    let speed = -ctrl.y * 0.25; 
+    let dx = Math.sin(player.angle) * speed;
+    let dy = -Math.cos(player.angle) * speed;
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
@@ -236,10 +255,12 @@ function render() {
     const ctx = cvs.getContext('2d');
     cvs.width = window.innerWidth; cvs.height = window.innerHeight;
     ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    
     ctx.save();
     ctx.translate(cvs.width/2, cvs.height/2);
     ctx.rotate(-player.angle);
     ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
     for(let r=0; r<maze.dim; r++){
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) {
@@ -251,14 +272,20 @@ function render() {
         }
     }
     ctx.restore();
+
     ctx.save();
     ctx.translate(cvs.width/2, cvs.height/2);
     ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -cellSize*player.r - 10); ctx.lineTo(-8, -cellSize*player.r + 2); ctx.lineTo(8, -cellSize*player.r + 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -cellSize*player.r - 10); ctx.lineTo(-7, -cellSize*player.r + 3); ctx.lineTo(7, -cellSize*player.r + 3); ctx.fill();
     ctx.restore();
 }
 
-// === 7. BLE ===
+// === 6. СЛАЙДЕР И BLE ===
+document.getElementById('skill-slider').oninput = (e) => {
+    skill = parseFloat(e.target.value);
+    document.getElementById('lbl-skill').innerText = skill.toFixed(2);
+};
+
 document.getElementById('btn-start').onclick = async () => {
     try {
         const device = await navigator.bluetooth.requestDevice({ filters: [{ services:[SERVICE_UUID] }] });
