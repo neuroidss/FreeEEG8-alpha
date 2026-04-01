@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Neuro Tank: Maze Spinner</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border: 2px solid #0f0; border-radius: 8px; pointer-events: none; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 20;
+        }
+        button {
+            background: #000; color: #0f0; border: 2px solid #0f0;
+            padding: 20px 40px; font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 10px; margin-top: 20px;
+        }
+        button:hover { background: #0f0; color: #000; }
+        .val { color: #fff; font-size: 18px; }
+        .stat { font-size: 16px; margin-bottom: 5px; }
+        #calib-bar { width: 300px; height: 20px; border: 2px solid #0f0; margin-top: 20px; display: none; }
+        #calib-fill { width: 0%; height: 100%; background: #0f0; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">FLOOR: <span id="lbl-floor" class="val">1</span></div>
+    <div class="stat">STEERING (L/R): <span id="lbl-x" class="val">0.00</span></div>
+    <div class="stat">GAS (FOCUS): <span id="lbl-gas" class="val">0.00</span></div>
+    <div id="lbl-status" style="color:#ff0; margin-top:10px; font-weight:bold;">READY</div>
+</div>
+
+<div id="overlay">
+    <h1 style="color:#fff; text-shadow: 0 0 15px #0f0; font-size: 40px;">NEURO SPINNER</h1>
+    <p style="color:#888; font-size: 18px; text-align: center;">
+        <b>ГАЗ:</b> Сфокусируйте волю (Игрок всегда идет вверх)<br>
+        <b>РУЛЬ:</b> Смещайте внимание влево/вправо (Вращает лабиринт)
+    </p>
+    <button id="btn-start">CONNECT & CALIBRATE</button>
+    <div id="calib-bar"><div id="calib-fill"></div></div>
+    <p id="calib-text" style="color:#ff0; margin-top: 10px; font-weight: bold; display: none;">Расслабьтесь. Идет калибровка центра...</p>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// === 1. НАСТРОЙКИ ===
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DATA_UUID    = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CMD_UUID     = "c0de0001-36e1-4688-b7f5-ea07361b26a8";
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+const ANGLES = [-72, -36, 36, 72, 108, 144, -144, -108].map(a => a * Math.PI / 180);
+const PINS_X = ANGLES.map(Math.cos);
+
+// Состояние игры
+let ctrl = { steer: 0, gas: 0, bias_x: 0, floor: 1 };
+let isConnected = false;
+let isCalibrating = false;
+
+const BUF_LEN = 250;
+let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_LEN));
+
+// === 2. DSP (Фильтр + Огибающая) ===
+class StabilizedFilter {
+    constructor() { this.x1=0; this.x2=0; this.y1=0; this.y2=0; this.envelope = 0; }
+    process(x) {
+        let out = 0.046 * x - 0.046 * this.x2 + 1.79 * this.y1 - 0.82 * this.y2;
+        this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=out;
+        this.envelope = this.envelope * 0.98 + Math.abs(out) * 0.02;
+        return out;
+    }
+}
+const channels = Array.from({length: 8}, () => new StabilizedFilter());
+
+// === 3. АУДИО (Мотор) ===
+class EngineAudio {
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.osc = this.ctx.createOscillator();
+        this.gainL = this.ctx.createGain();
+        this.gainR = this.ctx.createGain();
+        
+        this.osc.type = 'sawtooth'; // Звук мотора
+        this.merger = this.ctx.createChannelMerger(2);
+        
+        this.osc.connect(this.gainL); this.osc.connect(this.gainR);
+        this.gainL.connect(this.merger, 0, 0);
+        this.gainR.connect(this.merger, 0, 1);
+        this.merger.connect(this.ctx.destination);
+        
+        this.gainL.gain.value = 0; this.gainR.gain.value = 0;
+        this.osc.start();
+    }
+    update() {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        
+        // Газ = Громкость и Высота тона
+        let vol = Math.min(0.3, ctrl.gas * 0.3);
+        let freq = 100 + (ctrl.gas * 300); // От 100Гц (холостые) до 400Гц (полный газ)
+        this.osc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.1);
+        
+        // Руль = Панорама
+        let panL = Math.max(0, Math.min(1, 1.0 - ctrl.steer));
+        let panR = Math.max(0, Math.min(1, 1.0 + ctrl.steer));
+        
+        this.gainL.gain.setTargetAtTime(panL * vol, this.ctx.currentTime, 0.1);
+        this.gainR.gain.setTargetAtTime(panR * vol, this.ctx.currentTime, 0.1);
+    }
+}
+let audio;
+
+// === 4. ГЕНЕРАТОР ЛАБИРИНТА ===
+class Maze {
+    constructor(dim) {
+        this.dim = dim;
+        this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+        this.gen(1, 1);
+        this.grid[dim-2][dim-2] = 2; // Portal
+    }
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+}
+
+let maze = new Maze(11);
+let player = { x: 1.5, y: 1.5, r: 0.3, angle: 0 }; // angle в радианах
+const cellSize = 80;
+
+// === 5. ИГРОВОЙ ЦИКЛ ===
+let calibSamples = 0;
+let calibSumX = 0;
+
+function gameLoop() {
+    if(!isConnected) return;
+
+    // --- DSP ---
+    let intensities = channels.map(c => c.envelope);
+    let sumInt = intensities.reduce((a,b)=>a+b, 0) + 0.001;
+    let meanInt = sumInt / 8;
+    let maxInt = Math.max(...intensities);
+    
+    // ГАЗ (Ось Z / Фокус)
+    let focus = maxInt / (meanInt + 0.001);
+    
+    // РУЛЬ (Ось X)
+    let cx = 0;
+    for(let i=0; i<8; i++) cx += (intensities[i]/sumInt) * PINS_X[i];
+
+    if (isCalibrating) {
+        calibSumX += cx;
+        calibSamples++;
+        return; // Во время калибровки не играем
+    }
+
+    // Если фокус выше порога - давим на газ
+    if(focus > 1.15) {
+        ctrl.gas = Math.min(1.0, (focus - 1.15) * 1.5);
+        
+        // Руль: вычитаем откалиброванный центр (bias_x)
+        let steer_raw = cx - ctrl.bias_x;
+        // Умножаем на чувствительность
+        ctrl.steer = Math.max(-1, Math.min(1, steer_raw * 20.0));
+    } else {
+        // Отпустили волю - танк останавливается, руль возвращается в ноль
+        ctrl.gas *= 0.8; 
+        ctrl.steer *= 0.8;
+    }
+
+    // --- ФИЗИКА ТАНКА ---
+    // 1. Вращение
+    let turnSpeed = 0.08;
+    player.angle += ctrl.steer * turnSpeed;
+
+    // 2. Движение ТОЛЬКО ВПЕРЕД (туда, куда смотрит танк)
+    // Так как в canvas Y идет вниз, а мы хотим лететь "вверх" по экрану:
+    let moveSpeed = 0.15 * ctrl.gas;
+    let dx = Math.sin(player.angle) * moveSpeed;
+    let dy = -Math.cos(player.angle) * moveSpeed;
+
+    const hit = (tx, ty) => {
+        let gx = Math.floor(tx), gy = Math.floor(ty);
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+        return maze.grid[gy][gx] === 1;
+    };
+
+    // Скольжение вдоль стен
+    if(!hit(player.x + dx + Math.sign(dx)*player.r, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy + Math.sign(dy)*player.r)) player.y += dy;
+
+    // --- ПОРТАЛ ---
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
+        document.getElementById('lbl-status').innerText = "PORTAL REACHED!";
+        if(ctrl.gas > 0.8) { // Чтобы войти, нужно дать полный газ
+            ctrl.floor++;
+            maze = new Maze(11 + ctrl.floor*2);
+            player.x = 1.5; player.y = 1.5; player.angle = 0;
+            document.getElementById('lbl-floor').innerText = ctrl.floor;
+        }
+    } else {
+        document.getElementById('lbl-status').innerText = "NAVIGATING...";
+    }
+
+    // Обновление UI и Звука
+    document.getElementById('lbl-x').innerText = ctrl.steer.toFixed(2);
+    document.getElementById('lbl-gas').innerText = ctrl.gas.toFixed(2);
+    audio.update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+    ctx.save();
+    
+    // 1. Переносим камеру в центр экрана
+    ctx.translate(cvs.width/2, cvs.height/2);
+    
+    // 2. ВРАЩАЕМ ВЕСЬ МИР вокруг игрока (игрок всегда смотрит вверх)
+    ctx.rotate(-player.angle);
+    
+    // 3. Сдвигаем мир так, чтобы игрок был в центре
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
+    // Рисуем лабиринт
+    for(let r=0; r<maze.dim; r++){
+        for(let c=0; c<maze.dim; c++){
+            if(maze.grid[r][c] === 1) {
+                ctx.fillStyle = '#1a1a20'; ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
+            } else if(maze.grid[r][c] === 2) {
+                ctx.fillStyle = '#0f0'; ctx.beginPath();
+                ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill();
+            }
+        }
+    }
+    ctx.restore();
+
+    // Рисуем игрока ПОВЕРХ вращающегося мира (он всегда в центре и смотрит вверх)
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    
+    // Тело танка/корабля
+    ctx.fillStyle = '#0ff'; ctx.beginPath();
+    ctx.arc(0, 0, cellSize*player.r, 0, Math.PI*2); ctx.fill();
+    
+    // Нос (показывает направление "вперед")
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    ctx.moveTo(0, -cellSize*player.r - 10);
+    ctx.lineTo(-10, -cellSize*player.r + 5);
+    ctx.lineTo(10, -cellSize*player.r + 5);
+    ctx.fill();
+    ctx.restore();
+
+    // UI Руля (Снизу экрана)
+    ctx.fillStyle = '#333'; ctx.fillRect(cvs.width/2 - 100, cvs.height - 50, 200, 10);
+    ctx.fillStyle = '#0ff'; ctx.fillRect(cvs.width/2 + ctrl.steer*100 - 5, cvs.height - 55, 10, 20);
+}
+
+// === 6. СТАРТ И КАЛИБРОВКА ===
+document.getElementById('btn-start').onclick = async () => {
+    try {
+        document.getElementById('btn-start').style.display = 'none';
+        document.getElementById('calib-text').style.display = 'block';
+        document.getElementById('calib-bar').style.display = 'block';
+
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const cmdChar = await service.getCharacteristic(CMD_UUID);
+        const dataChar = await service.getCharacteristic(DATA_UUID);
+
+        let pga = 2, val = (pga << 12) | (pga << 8) | (pga << 4) | pga;
+        await cmdChar.writeValue(new Uint8Array([0x04, (val>>8)&0xFF, val&0xFF]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, (val>>8)&0xFF, val&0xFF]));
+
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let s = 2 + i*3;
+                    let v = (b[s]<<16) | (b[s+1]<<8) | b[s+2];
+                    if(v & 0x800000) v -= 0x1000000;
+                    channels[i].process(v * UV_SCALE);
+                }
+            }
+        });
+
+        audio = new EngineAudio();
+        isConnected = true;
+        isCalibrating = true;
+        
+        // Запуск цикла для сбора данных калибровки
+        requestAnimationFrame(gameLoop);
+
+        // Калибровка 3 секунды
+        let calibTime = 3000;
+        let startT = Date.now();
+        let calibInterval = setInterval(() => {
+            let elapsed = Date.now() - startT;
+            document.getElementById('calib-fill').style.width = (elapsed/calibTime)*100 + '%';
+            if (elapsed >= calibTime) {
+                clearInterval(calibInterval);
+                ctrl.bias_x = calibSumX / calibSamples; // Устанавливаем ИДЕАЛЬНЫЙ НОЛЬ
+                isCalibrating = false;
+                document.getElementById('overlay').style.display = 'none';
+                console.log("Calibrated Bias X:", ctrl.bias_x);
+            }
+        }, 50);
+
+    } catch(e) { alert(e); }
+};
+</script>
+</body>
+</html>
