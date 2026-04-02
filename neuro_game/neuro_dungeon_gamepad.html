@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Neuro Gamepad Pro: Levels Edition</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.9); padding: 15px; border: 1px solid #0f0; min-width: 200px; }
+        .key { display: inline-block; padding: 5px 10px; border: 1px solid #555; margin-right: 5px; font-size: 10px; }
+        .active { background: #0f0; color: #000; border-color: #0f0; }
+        .floor { color: #0ff; font-size: 18px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+    </style>
+</head>
+<body>
+<div id="ui">
+    <div class="floor">FLOOR: <span id="floor-val">1</span></div>
+    STATUS: <span id="st">WAITING...</span><br><br>
+    <div id="btn-atk" class="key">ATTACK (W)</div>
+    <div id="btn-int" class="key">INTERACT (E)</div>
+</div>
+<canvas id="gameCanvas"></canvas>
+<script>
+let currentFloor = 1;
+let player = { x: 1.5, y: 1.5, angle: 0, color: '#0ff' };
+const cellSize = 80;
+
+class Maze {
+    constructor(dim) {
+        this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; // Финиш - зеленая точка
+    }
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+}
+
+let maze = new Maze(9);
+
+function gameLoop() {
+    let gps = navigator.getGamepads();
+    let gp = null;
+    for (let i = 0; i < gps.length; i++) {
+        if (gps[i] && (gps[i].id.includes("Link") || gps[i].axes.length >= 3)) { gp = gps[i]; break; }
+    }
+
+    if (gp) {
+        document.getElementById('st').innerText = "CONNECTED";
+        
+        // Кнопки
+        let atk = gp.buttons[2].pressed; 
+        let inter = gp.buttons[1].pressed;
+        document.getElementById('btn-atk').className = atk ? "key active" : "key";
+        document.getElementById('btn-int').className = inter ? "key active" : "key";
+        player.color = atk ? '#f00' : (inter ? '#00f' : '#0ff');
+
+        // Физика v8.1
+        let rx = gp.axes[0] * 10.0;
+        let ry = gp.axes[1] * 10.0;
+        let rtq = gp.axes[2] * 10.0;
+
+        player.angle += rtq * 0.5;
+        let fSpeed = -ry * 0.2;
+        let sSpeed = rx * 0.2;
+
+        let dx = Math.sin(player.angle) * fSpeed + Math.cos(player.angle) * sSpeed;
+        let dy = -Math.cos(player.angle) * fSpeed + Math.sin(player.angle) * sSpeed;
+
+        const hit = (tx, ty) => {
+            let gx = Math.floor(tx), gy = Math.floor(ty);
+            if (gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+            return maze.grid[gy][gx] === 1;
+        };
+
+        if(!hit(player.x + dx, player.y)) player.x += dx;
+        if(!hit(player.x, player.y + dy)) player.y += dy;
+
+        // ПРОВЕРКА ФИНИША (Переход на следующий уровень)
+        let px = Math.floor(player.x);
+        let py = Math.floor(player.y);
+        if (maze.grid[py][px] === 2) {
+            currentFloor++;
+            document.getElementById('floor-val').innerText = currentFloor;
+            // Увеличиваем размер лабиринта каждые 2 уровня
+            let newDim = 9 + Math.floor(currentFloor / 2) * 2;
+            if (newDim > 25) newDim = 25; // Ограничение размера
+            maze = new Maze(newDim);
+            player.x = 1.5;
+            player.y = 1.5;
+            player.angle = 0;
+        }
+    }
+
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas'), ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+    
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.rotate(-player.angle);
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
+    for(let r=0; r<maze.dim; r++){
+        for(let c=0; c<maze.dim; c++){
+            if(maze.grid[r][c] === 1) { 
+                ctx.fillStyle = '#111'; 
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize); 
+            }
+            else if(maze.grid[r][c] === 2) { 
+                ctx.fillStyle = '#0f0'; 
+                ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill(); 
+                // Свечение финиша
+                ctx.shadowBlur = 20; ctx.shadowColor = '#0f0'; ctx.stroke(); ctx.shadowBlur = 0;
+            }
+        }
+    }
+    ctx.restore();
+
+    // Отрисовка игрока (всегда в центре экрана)
+    ctx.save();
+    ctx.translate(cvs.width/2, cvs.height/2);
+    ctx.fillStyle = player.color;
+    ctx.shadowBlur = 15; ctx.shadowColor = player.color;
+    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
+    
+    // Указатель направления
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(-5, -5); ctx.lineTo(5, -5); ctx.fill();
+    ctx.restore();
+}
+gameLoop();
+</script>
+</body>
+</html>
