@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.8: Anti-Tunneling & True Benchmark</title>
+    <title>Neuro Reactor v8.9: Ultimate Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -68,11 +68,11 @@
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.8</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.9</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Expo & True Benchmark Edition.<br>
+        Effort-Based Benchmark Edition.<br>
         Constant 11x11 Complex Maze.<br>
-        Anti-Tunneling Physics Enabled.
+        Strict Anti-Tunneling & Anti-Random Physics.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -109,7 +109,8 @@ let isVR = false;
 let invertDevice = false;
 let uiVisible = true;
 
-let actualDist = 0;
+// МЕТРИКА: Теперь мы считаем интеграл затраченного усилия, а не успешные шаги!
+let effortDist = 0;
 let scoresHistory =[];
 
 let ws = new WebSocket("ws://localhost:8765");
@@ -149,7 +150,7 @@ document.getElementById('btn-invert').onclick = () => {
 function fft(re, im) { 
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
-        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
+        if (j > i)[re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
         let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
     }
     for (let s = 2; s <= n; s <<= 1) {
@@ -204,7 +205,6 @@ class NeuroReactor {
     }
 }
 
-// === УМНЫЙ ГЕНЕРАТОР: ГАРАНТИЯ ТУПИКОВ И ПОВОРОТОВ ===
 class Maze {
     constructor(dim) {
         this.dim = dim;
@@ -215,7 +215,6 @@ class Maze {
         let bestExit = null;
         let bestGrid = null;
 
-        // Ищем лабиринт, где до финиша много поворотов и длинный путь
         while(!isValid && attempts < 100) {
             attempts++;
             this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
@@ -228,14 +227,13 @@ class Maze {
                 bestGrid = this.grid.map(row => [...row]);
             }
 
-            // Для 11x11 требуем путь >= 20 клеток и >= 5 поворотов
             if (exitParams.d >= 20 && exitParams.turns >= 5) {
                 isValid = true;
             }
         }
         
         this.grid = bestGrid;
-        this.grid[bestExit.y][bestExit.x] = 2; // Устанавливаем финиш в самую жесткую точку
+        this.grid[bestExit.y][bestExit.x] = 2; 
         this.optimalDist = bestExit.d;
     }
     
@@ -260,7 +258,6 @@ class Maze {
         while(q.length > 0) {
             let curr = q.shift();
             
-            // Оцениваем каждую точку: нам важна и длина, и количество изломов (поворотов)
             let score = curr.d + curr.turns * 3; 
             if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
                 maxScore = score;
@@ -329,7 +326,7 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // --- ФИЗИКА ДВИЖЕНИЯ (С ЗАЩИТОЙ ОТ ТУННЕЛИРОВАНИЯ - SUB-STEPPING) ---
+    // --- ФИЗИКА С ИДЕАЛЬНОЙ МЕТРИКОЙ И СТРОГИМИ СТОЛКНОВЕНИЯМИ ---
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
@@ -338,44 +335,38 @@ function gameLoop(time) {
     let targetDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
     let targetDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
 
+    // Считаем полное Затраченное Усилие (намерение) ДО столкновений.
+    // Если игрок будет генерировать шум и давить в стены, это Усилие будет накапливаться колоссальными темпами.
+    let intendedMove = Math.sqrt(targetDx*targetDx + targetDy*targetDy);
+    effortDist += intendedMove;
+
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
         if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
         return maze.grid[gy][gx] === 1;
     };
     
-    // Разбиваем большое движение на мелкие шажки по 0.05 юнита.
-    // Если игрок влетает в стену на огромной скорости, он физически не сможет ее "перепрыгнуть".
+    // Sub-stepping против туннелирования. Шаг не более 0.05
     let steps = Math.ceil(Math.max(Math.abs(targetDx), Math.abs(targetDy)) / 0.05);
     if (steps < 1) steps = 1;
     
     let sdx = targetDx / steps;
     let sdy = targetDy / steps;
-    
-    let movedX = 0, movedY = 0;
 
     for(let i=0; i<steps; i++) {
-        let stepMovedX = 0, stepMovedY = 0;
-        // Хитбокс радиусом 0.2
         if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) { 
             player.x += sdx; 
-            stepMovedX = sdx; 
         }
         if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) { 
             player.y += sdy; 
-            stepMovedY = sdy; 
         }
-        movedX += stepMovedX;
-        movedY += stepMovedY;
     }
-
-    // Трекинг пройденного расстояния (учитываем только фактическое пройденное движение)
-    actualDist += Math.sqrt(movedX*movedX + movedY*movedY);
 
     // ОБНОВЛЕНИЕ LIVE EFFICIENCY
     let currentEfficiency = 100;
-    if (actualDist > maze.optimalDist) {
-        currentEfficiency = Math.max(0, Math.round((maze.optimalDist / actualDist) * 100));
+    if (effortDist > maze.optimalDist) {
+        // Мы используем min(100, ...), чтобы процент не переваливал за сотню при срезке углов
+        currentEfficiency = Math.max(0, Math.min(100, Math.round((maze.optimalDist / effortDist) * 100)));
     }
     
     let accColor = currentEfficiency > 80 ? '#0f0' : (currentEfficiency > 50 ? '#ff0' : '#f00');
@@ -395,10 +386,9 @@ function gameLoop(time) {
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
         
-        // Размер 11x11: идеальный баланс между сложным поиском пути и скоростью раунда
         maze = new Maze(11); 
         player.x = player.y = 1.5;
-        actualDist = 0; 
+        effortDist = 0; 
     }
 
     if (uiVisible) {
@@ -524,7 +514,7 @@ document.addEventListener('fullscreenchange', () => {
 function startGame() {
     requestWakeLock(); 
     maze = new Maze(11); 
-    actualDist = 0;
+    effortDist = 0;
     scoresHistory =[];
     document.getElementById('overlay').style.display = 'none'; 
     isConnected = true; 
