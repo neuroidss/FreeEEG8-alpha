@@ -3,19 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.4: Expo Edition (Orientation Fix)</title>
+    <title>Neuro Reactor v8.5: Expo VR (Physics & Zoom Restored)</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
         
         #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: opacity 0.3s; }
-        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
         #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
         #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.1s linear; }
         #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #080808; }
         #pointer { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px #fff; z-index: 10; }
         .node-dot { width: 4px; height: 4px; background: #333; position: absolute; border-radius: 50%; }
         
+        .slider-box { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
+        input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
+
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
         .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
         .btn:active { background: #0f0; color: #000; }
@@ -27,25 +30,32 @@
 <body>
 
 <div id="ui">
-    <div class="stat">SYNAPTIC PERSISTENCE:</div>
+    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff">1</span></div>
+    <div class="stat">SYNAPTIC TRACE:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
     <div id="radar"></div>
     <div class="stat">WS: <span id="ws-st" style="color:red">OFF</span></div>
-    <div class="stat">BTN: <span id="btn-st">NONE</span></div>
-    <div class="stat" style="font-size:10px; margin-top:10px;">REACTIVE: <span id="lbl-skill">0.05</span></div>
-    <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05" style="width:100%">
     
-    <!-- Переключатель ориентации кабеля -->
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span>REACTIVE LVL</span><span id="lbl-skill">0.05</span></div>
+        <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
+    </div>
+
+    <!-- ПОЛЗУНОК МАСШТАБА (Поможет найти баланс между скоростью обучения и обзором) -->
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span>CAMERA ZOOM</span><span id="lbl-zoom">80</span></div>
+        <input type="range" id="zoom-slider" min="20" max="150" step="1" value="80">
+    </div>
+    
     <button id="btn-invert" class="btn">USB CABLE: TOP</button>
     <button id="vr-toggle" class="btn">ENTER VR MODE</button>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff;">NEURO REACTOR v8.4 VR</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.5</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Expo Mode: No Sleep.<br>
-        Physical setup: Align Ch 2,3,4,5 Anterior (Front).<br>
-        If USB cable points down (180° rotation), use the "USB CABLE" toggle in the menu.
+        Physics & Optic Flow Restored.<br>
+        If USB points down, use "USB CABLE" toggle.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -54,15 +64,14 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- ЭКРАН НЕ ГАСНЕТ ---
+// === WAKE LOCK ===
 let wakeLock = null;
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
-            wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
         }
-    } catch (err) { console.error(`${err.name}, ${err.message}`); }
+    } catch (err) {}
 }
 document.addEventListener('visibilitychange', async () => {
     if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
@@ -79,34 +88,37 @@ const imArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
 const centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
 let electrodePressure = new Float32Array(8);
 
-let isConnected = false, skillLevel = 0.05, synapticPersistence = 0;
+let isConnected = false, skillLevel = 0.05, zoomLevel = 80, synapticPersistence = 0;
 let lastTargetX = 0, lastTargetY = 0;
 let ctrl = { moveX: 0, moveY: 0, torque: 0 };
 let player = { x: 1.5, y: 1.5, angle: 0 };
 let maze, reactor;
 let isVR = false; 
-
-// Флаг инверсии устройства (поворот на 180 градусов)
 let invertDevice = false;
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 
-// Отрисовка радара с учетом инверсии
+// UI Слайдеры
+document.getElementById('skill-slider').oninput = (e) => {
+    skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
+};
+document.getElementById('zoom-slider').oninput = (e) => {
+    zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel;
+};
+
 function drawRadar() {
     const radar = document.getElementById('radar');
     radar.innerHTML = '<div id="pointer"></div>';
-    const mult = invertDevice ? -1 : 1; // Умножаем координаты на -1 при развороте девайса
+    const mult = invertDevice ? -1 : 1;
     ELECTRODES.forEach(e => {
         let dot = document.createElement('div'); dot.className = 'node-dot';
-        dot.style.left = (50 + e.x * 4 * mult) + '%'; 
-        dot.style.top = (50 + e.y * 4 * mult) + '%';
+        dot.style.left = (50 + e.x * 4 * mult) + '%'; dot.style.top = (50 + e.y * 4 * mult) + '%';
         radar.appendChild(dot);
     });
 }
-drawRadar(); // Инициализация радара
+drawRadar(); 
 
-// Переключатель ориентации устройства
 document.getElementById('btn-invert').onclick = () => {
     invertDevice = !invertDevice;
     const btn = document.getElementById('btn-invert');
@@ -114,10 +126,10 @@ document.getElementById('btn-invert').onclick = () => {
     btn.style.borderColor = invertDevice ? "#ff0" : "#0f0";
     btn.style.color = invertDevice ? "#ff0" : "#0f0";
     btn.style.boxShadow = invertDevice ? "0 0 10px #ff0" : "0 0 10px #0f0";
-    drawRadar(); // Перерисовываем точки на радаре
+    drawRadar();
 };
 
-function fft(re, im) { 
+function fft(re, im) { /* Без изменений */
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
         if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
@@ -176,7 +188,7 @@ class NeuroReactor {
 }
 
 let lastEegProcess = 0;
-let target_vx = 0, target_vy = 0, target_tq = 0, target_div = 0;
+let target_vx = 0, target_vy = 0, target_tq = 0;
 
 function gameLoop(time) {
     if(!isConnected) return;
@@ -190,14 +202,13 @@ function gameLoop(time) {
             for(let t=0; t<BUF_SIZE; t++) { reArr[c][t] = centered[c][t]; imArr[c][t] = 0; }
             fft(reArr[c], imArr[c]); applyNotchFilters(reArr[c], imArr[c]);
         }
-        target_vx = 0; target_vy = 0; target_tq = 0; target_div = 0; electrodePressure.fill(0);
+        target_vx = 0; target_vy = 0; target_tq = 0; electrodePressure.fill(0);
         for(let i=0; i<8; i++) {
             for(let j=i+1; j<8; j++) {
                 let val = get_ciPLV(i, j);
                 let dx = ELECTRODES[j].x - ELECTRODES[i].x, dy = ELECTRODES[j].y - ELECTRODES[i].y;
                 target_vx += val * dx; target_vy += val * dy;
                 target_tq += (val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx)) / (RADIUS * 10);
-                target_div += val * (dx * ELECTRODES[i].x + dy * ELECTRODES[i].y) / RADIUS;
                 electrodePressure[i] += Math.abs(val); electrodePressure[j] += Math.abs(val);
             }
         }
@@ -210,47 +221,47 @@ function gameLoop(time) {
         if(reactor) reactor.update(target_vx, target_vy, target_tq, synapticPersistence);
     }
 
-    // ИНВЕРСИЯ ВЕКТОРОВ: Если девайс надет задом наперед, умножаем оси на -1
     let out_vx = invertDevice ? -target_vx : target_vx;
     let out_vy = invertDevice ? -target_vy : target_vy;
 
     let smooth = 0.98 - (skillLevel * 0.1), gain = skillLevel * 1.5, boost = (1.0 + synapticPersistence * 4.0);
     
-    // Используем скорректированные векторы для движения
     ctrl.moveX = ctrl.moveX * smooth + out_vx * gain * (1 - smooth);
     ctrl.moveY = ctrl.moveY * smooth + out_vy * gain * (1 - smooth);
-    // Вращение (Torque) не меняется при развороте на 180 градусов!
     ctrl.torque = ctrl.torque * smooth + target_tq * gain * 0.5 * (1 - smooth);
-    
-    let atk = target_div < -1.8 && synapticPersistence > 0.3;
-    let inter = target_div > 1.8 && synapticPersistence > 0.3;
-    document.getElementById('btn-st').innerText = atk ? "ATTACK" : (inter ? "INTERACT" : "NONE");
 
     if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, 
-            tq: (ctrl.torque * boost) / 10.0, atk: atk, int: inter
-        }));
+        ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
+    // === ТА САМАЯ ИДЕНТИЧНАЯ ФИЗИКА ИЗ DUAL_STICK.HTML ===
     player.angle += ctrl.torque * boost * 0.5;
-    let fSpeed = -ctrl.moveY * boost * 0.2, sSpeed = ctrl.moveX * boost * 0.2;
-    let dx = Math.sin(player.angle) * fSpeed + Math.cos(player.angle) * sSpeed;
-    let dy = -Math.cos(player.angle) * fSpeed + Math.sin(player.angle) * sSpeed;
+    
+    let forwardSpeed = -ctrl.moveY * boost * 0.2;
+    let strafeSpeed = ctrl.moveX * boost * 0.2;
+    
+    let dx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let dy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
-        return (gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) ? true : maze.grid[gy][gx] === 1;
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+        return maze.grid[gy][gx] === 1;
     };
-    if(!hit(player.x + dx, player.y)) player.x += dx;
-    if(!hit(player.x, player.y + dy)) player.y += dy;
+    
+    // ФИКС СКОЛЬЖЕНИЯ ПО СТЕНАМ (Math.sign(dx)*0.1)
+    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) player.x += dx;
+    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) player.y += dy;
 
+    // ПЕРЕХОД НА НОВЫЙ ЭТАЖ
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        maze = new Maze(9 + 2); player.x = player.y = 1.5;
+        let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
+        document.getElementById('lbl-floor').innerText = fl;
+        maze = new Maze(9 + (fl > 5 ? 10 : fl*2)); // Ограничиваем рост лабиринта
+        player.x = player.y = 1.5;
     }
 
     document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
-    // Поинтер на радаре всегда совпадает с физическим направлением движения
     document.getElementById('pointer').style.left = (50 + ctrl.moveX * 5) + '%';
     document.getElementById('pointer').style.top = (50 + ctrl.moveY * 5) + '%';
     
@@ -274,21 +285,20 @@ class Maze {
 }
 
 function drawScene(ctx, width, height, playerDisparity) {
-    const baseSize = Math.min(width, height);
-    const cellSize = baseSize / (maze.dim * 1.8); 
+    // ВАЖНО: Используем zoomLevel из UI, а не динамический расчет. 80 = как было раньше!
+    const cellSize = zoomLevel; 
     
     ctx.save(); 
     ctx.translate(width/2, height/2); 
     ctx.rotate(-player.angle); 
     ctx.translate(-player.x*cellSize, -player.y*cellSize);
     
-    ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(-cellSize, -cellSize, (maze.dim+2)*cellSize, (maze.dim+2)*cellSize);
-    
+    // Отрисовка клеток
     for(let r=0; r<maze.dim; r++){ 
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) { 
-                ctx.fillStyle = '#111'; ctx.fillRect(c*cellSize, r*cellSize, cellSize+1, cellSize+1); 
+                ctx.fillStyle = `rgb(10, ${20 + synapticPersistence*80}, 30)`;
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize+1, cellSize+1); 
                 ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             }
             else if(maze.grid[r][c] === 2) { 
@@ -298,11 +308,12 @@ function drawScene(ctx, width, height, playerDisparity) {
     }
     ctx.restore();
 
+    // Игрок
     ctx.save(); 
     ctx.translate(width/2 + playerDisparity, height/2); 
-    let pSize = cellSize * 0.3; 
+    let pSize = cellSize * 0.25; 
     ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, pSize, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize); ctx.lineTo(-pSize/3, -pSize/3); ctx.lineTo(pSize/3, -pSize/3); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize*1.5); ctx.lineTo(-pSize*0.7, pSize*0.5); ctx.lineTo(pSize*0.7, pSize*0.5); ctx.fill();
     ctx.restore();
 
     if (isVR) {
@@ -375,10 +386,6 @@ document.addEventListener('fullscreenchange', () => {
         document.body.style.cursor = 'default';
     }
 });
-
-document.getElementById('skill-slider').oninput = (e) => {
-    skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
-};
 
 function startGame() {
     requestWakeLock(); 
