@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.7: Benchmark & Expo Edition</title>
+    <title>Neuro Reactor v8.8: Anti-Tunneling & True Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
         
-        /* UI Panel - Теперь сворачиваемая! */
         #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; max-height: 90vh; overflow-y: auto; }
         #ui.hidden { transform: translateX(-120%); opacity: 0; pointer-events: none; }
         
@@ -24,7 +23,6 @@
         .slider-box { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
         input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
 
-        /* Раздел Аналитики / Бенчмарка */
         .analytics { margin-top: 15px; padding-top: 15px; border-top: 2px dashed #0f0; }
         .analytics .stat { color: #ff0; }
 
@@ -34,7 +32,6 @@
         
         #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; margin-top: 15px; }
         
-        /* Кнопка скрытия UI для мобилок */
         #btn-hide-ui { position: absolute; bottom: 20px; right: 20px; z-index: 20; background: #000; border: 2px solid #0f0; color: #0f0; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 0 10px #0f0; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
@@ -43,7 +40,6 @@
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
     
-    <!-- НОВЫЙ БЛОК БЕНЧМАРКА СКИЛЛА -->
     <div class="analytics">
         <div class="stat" style="color:#0ff">EFFICIENCY: <span id="lbl-live-acc" class="highlight">100%</span></div>
         <div class="stat">AVG ACCURACY: <span id="lbl-avg-acc" class="highlight">--%</span></div>
@@ -69,14 +65,14 @@
     <button id="vr-toggle" class="btn">ENTER VR MODE</button>
 </div>
 
-<!-- Кнопка скрытия UI -->
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.7</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.8</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Expo & Benchmark Edition.<br>
-        Built-in Anti-Random Path Efficiency Tracker.
+        Expo & True Benchmark Edition.<br>
+        Constant 11x11 Complex Maze.<br>
+        Anti-Tunneling Physics Enabled.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -85,7 +81,6 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- WAKE LOCK ---
 let wakeLock = null;
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {}
@@ -114,14 +109,12 @@ let isVR = false;
 let invertDevice = false;
 let uiVisible = true;
 
-// --- АНАЛИТИКА СКИЛЛА ---
 let actualDist = 0;
 let scoresHistory =[];
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 
-// UI Слайдеры и Кнопки
 document.getElementById('skill-slider').oninput = (e) => { skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3); };
 document.getElementById('zoom-slider').oninput = (e) => { zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel; };
 
@@ -211,20 +204,39 @@ class NeuroReactor {
     }
 }
 
-// === УМНЫЙ ГЕНЕРАТОР ЛАБИРИНТА С БЕНЧМАРКОМ ===
+// === УМНЫЙ ГЕНЕРАТОР: ГАРАНТИЯ ТУПИКОВ И ПОВОРОТОВ ===
 class Maze {
     constructor(dim) {
         this.dim = dim;
         this.optimalDist = 0;
         
-        // Anti-Random Protection: Генерируем лабиринт до тех пор, пока идеальный путь не станет >= 14 шагам
-        // Это гарантирует, что случайным блужданием дойти до выхода будет крайне сложно.
-        do {
+        let isValid = false;
+        let attempts = 0;
+        let bestExit = null;
+        let bestGrid = null;
+
+        // Ищем лабиринт, где до финиша много поворотов и длинный путь
+        while(!isValid && attempts < 100) {
+            attempts++;
             this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
             this.gen(1, 1);
-            this.grid[dim-2][dim-2] = 2; // Финиш
-            this.optimalDist = this.calculateOptimalPath();
-        } while(this.optimalDist < 14);
+            
+            let exitParams = this.findHardestExit();
+            
+            if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
+                bestExit = exitParams;
+                bestGrid = this.grid.map(row => [...row]);
+            }
+
+            // Для 11x11 требуем путь >= 20 клеток и >= 5 поворотов
+            if (exitParams.d >= 20 && exitParams.turns >= 5) {
+                isValid = true;
+            }
+        }
+        
+        this.grid = bestGrid;
+        this.grid[bestExit.y][bestExit.x] = 2; // Устанавливаем финиш в самую жесткую точку
+        this.optimalDist = bestExit.d;
     }
     
     gen(x, y) {
@@ -237,27 +249,36 @@ class Maze {
         });
     }
 
-    // Breadth-First Search (BFS) для нахождения идеального пути
-    calculateOptimalPath() {
-        let q = [{x:1, y:1, d:0}];
+    findHardestExit() {
+        let q =[{x:1, y:1, d:0, dx:0, dy:0, turns:0}];
         let visited = Array.from({length: this.dim}, () => Array(this.dim).fill(false));
         visited[1][1] = true;
+        
+        let best = {x:1, y:1, d:0, turns:0};
+        let maxScore = 0;
+
         while(q.length > 0) {
             let curr = q.shift();
-            if (curr.x === this.dim-2 && curr.y === this.dim-2) return curr.d; // Нашли финиш
             
+            // Оцениваем каждую точку: нам важна и длина, и количество изломов (поворотов)
+            let score = curr.d + curr.turns * 3; 
+            if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
+                maxScore = score;
+                best = curr;
+            }
+
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
                 let nx = curr.x + dx, ny = curr.y + dy;
-                // Проверяем возможность шага (0 - коридор, 2 - финиш)
                 if (nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1) {
-                    if (!visited[ny][nx] && this.grid[ny][nx] !== 1) {
+                    if (!visited[ny][nx] && this.grid[ny][nx] === 0) {
                         visited[ny][nx] = true;
-                        q.push({x:nx, y:ny, d:curr.d + 1});
+                        let isTurn = (curr.dx !== 0 || curr.dy !== 0) && (curr.dx !== dx || curr.dy !== dy);
+                        q.push({x:nx, y:ny, d:curr.d + 1, dx:dx, dy:dy, turns: curr.turns + (isTurn ? 1 : 0)});
                     }
                 }
             });
         }
-        return 0; 
+        return best;
     }
 }
 
@@ -308,14 +329,14 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // --- ФИЗИКА ДВИЖЕНИЯ И ТРЕКИНГ АНАЛИТИКИ ---
+    // --- ФИЗИКА ДВИЖЕНИЯ (С ЗАЩИТОЙ ОТ ТУННЕЛИРОВАНИЯ - SUB-STEPPING) ---
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
     let strafeSpeed = ctrl.moveX * boost * 0.2;
     
-    let dx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
-    let dy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
+    let targetDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let targetDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
@@ -323,29 +344,46 @@ function gameLoop(time) {
         return maze.grid[gy][gx] === 1;
     };
     
+    // Разбиваем большое движение на мелкие шажки по 0.05 юнита.
+    // Если игрок влетает в стену на огромной скорости, он физически не сможет ее "перепрыгнуть".
+    let steps = Math.ceil(Math.max(Math.abs(targetDx), Math.abs(targetDy)) / 0.05);
+    if (steps < 1) steps = 1;
+    
+    let sdx = targetDx / steps;
+    let sdy = targetDy / steps;
+    
     let movedX = 0, movedY = 0;
-    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) { player.x += dx; movedX = dx; }
-    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) { player.y += dy; movedY = dy; }
 
-    // Трекинг пройденного расстояния (только фактическое успешное движение)
+    for(let i=0; i<steps; i++) {
+        let stepMovedX = 0, stepMovedY = 0;
+        // Хитбокс радиусом 0.2
+        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) { 
+            player.x += sdx; 
+            stepMovedX = sdx; 
+        }
+        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) { 
+            player.y += sdy; 
+            stepMovedY = sdy; 
+        }
+        movedX += stepMovedX;
+        movedY += stepMovedY;
+    }
+
+    // Трекинг пройденного расстояния (учитываем только фактическое пройденное движение)
     actualDist += Math.sqrt(movedX*movedX + movedY*movedY);
 
     // ОБНОВЛЕНИЕ LIVE EFFICIENCY
-    // Если actualDist <= optimalDist, игрок идет идеально -> 100%
-    // Если actualDist > optimalDist (свернул не туда), процент начинает падать
     let currentEfficiency = 100;
     if (actualDist > maze.optimalDist) {
         currentEfficiency = Math.max(0, Math.round((maze.optimalDist / actualDist) * 100));
     }
     
-    // Меняем цвет текста в зависимости от качества контроля
     let accColor = currentEfficiency > 80 ? '#0f0' : (currentEfficiency > 50 ? '#ff0' : '#f00');
     document.getElementById('lbl-live-acc').innerText = currentEfficiency + "%";
     document.getElementById('lbl-live-acc').style.color = accColor;
 
     // ПЕРЕХОД НА НОВЫЙ ЭТАЖ
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        // Сохраняем результат
         scoresHistory.push(currentEfficiency);
         
         let avgScore = Math.round(scoresHistory.reduce((a,b)=>a+b,0) / scoresHistory.length);
@@ -357,10 +395,10 @@ function gameLoop(time) {
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
         
-        // Генерация нового лабиринта с защитой
-        maze = new Maze(9); 
+        // Размер 11x11: идеальный баланс между сложным поиском пути и скоростью раунда
+        maze = new Maze(11); 
         player.x = player.y = 1.5;
-        actualDist = 0; // Сброс трекера
+        actualDist = 0; 
     }
 
     if (uiVisible) {
@@ -404,7 +442,6 @@ function drawScene(ctx, width, height, playerDisparity) {
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize*1.5); ctx.lineTo(-pSize*0.7, pSize*0.5); ctx.lineTo(pSize*0.7, pSize*0.5); ctx.fill();
     ctx.restore();
 
-    // Минималистичный VR HUD
     if (isVR) {
         ctx.save();
         ctx.translate(width / 2 - 75, height - 80);
@@ -415,11 +452,9 @@ function drawScene(ctx, width, height, playerDisparity) {
         ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
         ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
         
-        // Показываем эффективность пути прямо в очках
         let liveAcc = document.getElementById('lbl-live-acc').innerText;
         ctx.fillStyle = document.getElementById('lbl-live-acc').style.color; 
         ctx.font = '14px monospace'; ctx.fillText('ACCURACY: ' + liveAcc, 10, 45);
-        
         ctx.restore();
     }
 }
@@ -488,7 +523,7 @@ document.addEventListener('fullscreenchange', () => {
 
 function startGame() {
     requestWakeLock(); 
-    maze = new Maze(9); 
+    maze = new Maze(11); 
     actualDist = 0;
     scoresHistory =[];
     document.getElementById('overlay').style.display = 'none'; 
