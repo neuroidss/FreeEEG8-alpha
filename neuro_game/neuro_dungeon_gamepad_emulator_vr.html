@@ -2,16 +2,16 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>Neuro Reactor v8.1: VR Pro Link</title>
     <style>
-        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
         
         #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: opacity 0.3s; }
         .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; }
         #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
-        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; }
+        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.1s linear; }
         #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #080808; }
         #pointer { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px #fff; z-index: 10; }
         .node-dot { width: 4px; height: 4px; background: #333; position: absolute; border-radius: 50%; }
@@ -33,7 +33,7 @@
     <div class="stat">BTN: <span id="btn-st">NONE</span></div>
     <div class="stat" style="font-size:10px; margin-top:10px;">REACTIVE: <span id="lbl-skill">0.05</span></div>
     <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05" style="width:100%">
-    <button id="vr-toggle" class="btn" style="width:100%; padding: 10px; font-size: 16px;">VR MODE: OFF</button>
+    <button id="vr-toggle" class="btn" style="width:100%; padding: 10px; font-size: 16px; margin: 15px 0 0 0;">ENTER VR MODE</button>
 </div>
 
 <div id="overlay">
@@ -61,7 +61,7 @@ let lastTargetX = 0, lastTargetY = 0;
 let ctrl = { moveX: 0, moveY: 0, torque: 0 };
 let player = { x: 1.5, y: 1.5, angle: 0 };
 let maze, reactor;
-let isVR = false; // Флаг VR режима
+let isVR = false; 
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
@@ -72,7 +72,7 @@ ELECTRODES.forEach(e => {
     document.getElementById('radar').appendChild(dot);
 });
 
-function fft(re, im) { /* ... сохраняем математику как было ... */ 
+function fft(re, im) { 
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
         if (j > i) [re[i], re[j]] = [re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
@@ -108,7 +108,7 @@ function get_ciPLV(idxA, idxB) {
     return denom < 0.001 ? 0 : mIm / denom;
 }
 
-class NeuroReactor { /* Звук сохраняем */
+class NeuroReactor { 
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         this.masterGain = this.ctx.createGain(); this.masterGain.connect(this.ctx.destination);
@@ -181,7 +181,6 @@ function gameLoop(time) {
         }));
     }
 
-    // Для теста без BLE, добавляем небольшое движение от мыши (для отладки)
     player.angle += ctrl.torque * boost * 0.5;
     let fSpeed = -ctrl.moveY * boost * 0.2, sSpeed = ctrl.moveX * boost * 0.2;
     let dx = Math.sin(player.angle) * fSpeed + Math.cos(player.angle) * sSpeed;
@@ -221,22 +220,19 @@ class Maze {
     }
 }
 
-// Отрисовка конкретной сцены (вызывается 1 раз для 2D, 2 раза для VR)
 function drawScene(ctx, width, height, parallaxOffset) {
     const cellSize = 80;
     
-    // Отрисовка лабиринта (Дальний план - сдвиг сильнее)
+    // Лабиринт (дальний план)
     ctx.save(); 
     ctx.translate(width/2, height/2); 
     ctx.rotate(-player.angle); 
-    // Применяем параллакс к лабиринту. Чем больше значение, тем глубже кажется фон.
     ctx.translate(-player.x*cellSize + parallaxOffset * 1.5, -player.y*cellSize);
     
     for(let r=0; r<maze.dim; r++){ 
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) { 
                 ctx.fillStyle = '#111'; ctx.fillRect(c*cellSize, r*cellSize, cellSize+1, cellSize+1); 
-                // Сетка для объема
                 ctx.strokeStyle = '#222'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             }
             else if(maze.grid[r][c] === 2) { 
@@ -246,30 +242,25 @@ function drawScene(ctx, width, height, parallaxOffset) {
     }
     ctx.restore();
 
-    // Отрисовка игрока (Ближний план - сдвиг меньше, кажется что висит в воздухе)
+    // Игрок (ближний план)
     ctx.save(); 
     ctx.translate(width/2, height/2); 
-    // Меньший параллакс заставляет объект казаться ближе к лицу
     ctx.translate(parallaxOffset * 0.2, 0);
     ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
-    
-    // Нос (направление)
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(-5, -5); ctx.lineTo(5, -5); ctx.fill();
     ctx.restore();
 
-    // Отрисовка UI внутри VR (чтобы было видно в очках)
+    // Минималистичный внутриигровой HUD
     if (isVR) {
         ctx.save();
-        ctx.translate(20, height - 60);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(0, 0, 150, 40);
-        
-        ctx.fillStyle = '#0f0';
-        ctx.font = '10px monospace';
-        ctx.fillText('SYNAPSE:', 10, 15);
-        
-        ctx.fillStyle = '#111'; ctx.fillRect(10, 20, 130, 8);
-        ctx.fillStyle = '#0ff'; ctx.fillRect(10, 20, 130 * synapticPersistence, 8);
+        ctx.translate(width / 2 - 75, height - 80);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, 150, 50);
+        ctx.fillStyle = '#0f0'; ctx.font = '12px monospace'; ctx.fillText('SYNAPSE PERSISTENCE', 10, 15);
+        ctx.fillStyle = '#111'; ctx.fillRect(10, 25, 130, 8);
+        ctx.fillStyle = '#0ff'; ctx.fillRect(10, 25, 130 * synapticPersistence, 8);
+        // Подсказка выхода
+        ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.fillText('TAP SCREEN TO EXIT VR', 10, 45);
         ctx.restore();
     }
 }
@@ -281,23 +272,22 @@ function render() {
 
     if (isVR) {
         const halfW = cvs.width / 2;
-        const ipd = 12; // Смещение зрачков (Inter-Pupillary Distance) - настройка силы 3D
+        const ipd = 12; // Смещение зрачков для 3D глубины
 
         // Левый глаз
         ctx.save();
         ctx.beginPath(); ctx.rect(0, 0, halfW, cvs.height); ctx.clip();
-        ctx.translate(0, 0);
-        drawScene(ctx, halfW, cvs.height, ipd); // Положительный сдвиг
+        drawScene(ctx, halfW, cvs.height, ipd);
         ctx.restore();
 
         // Правый глаз
         ctx.save();
         ctx.beginPath(); ctx.rect(halfW, 0, halfW, cvs.height); ctx.clip();
         ctx.translate(halfW, 0);
-        drawScene(ctx, halfW, cvs.height, -ipd); // Отрицательный сдвиг
+        drawScene(ctx, halfW, cvs.height, -ipd);
         ctx.restore();
 
-        // Разделительная линия по центру
+        // Разделительная линия
         ctx.fillStyle = '#000';
         ctx.fillRect(halfW - 2, 0, 4, cvs.height);
     } else {
@@ -305,22 +295,49 @@ function render() {
     }
 }
 
-// VR Toggle логика
-document.getElementById('vr-toggle').onclick = () => {
+// Управление Fullscreen и VR
+function toggleVR() {
     isVR = !isVR;
+    const ui = document.getElementById('ui');
+    const docEl = document.documentElement;
+
     if (isVR) {
-        document.getElementById('vr-toggle').innerText = "VR MODE: ON";
-        document.getElementById('vr-toggle').style.color = "#0f0";
-        document.getElementById('vr-toggle').style.borderColor = "#0f0";
-        // Скрываем обычный UI, чтобы не мешал сплит-скрину
-        document.getElementById('ui').style.opacity = '0.3'; 
+        ui.style.display = 'none'; // Полностью прячем интерфейс
+        document.body.style.cursor = 'none'; // Прячем курсор мыши
+        
+        // Переход в Fullscreen (убирает адресную строку)
+        if (docEl.requestFullscreen) docEl.requestFullscreen();
+        else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+        
+        // Попытка заблокировать экран в горизонтальном положении
+        try { screen.orientation.lock("landscape").catch(()=>{}); } catch(e){}
     } else {
-        document.getElementById('vr-toggle').innerText = "VR MODE: OFF";
-        document.getElementById('vr-toggle').style.color = "#f0f";
-        document.getElementById('vr-toggle').style.borderColor = "#f0f";
-        document.getElementById('ui').style.opacity = '1';
+        ui.style.display = 'block'; // Возвращаем интерфейс
+        document.body.style.cursor = 'default';
+        
+        // Выход из Fullscreen
+        if (document.fullscreenElement) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
     }
-};
+}
+
+document.getElementById('vr-toggle').onclick = toggleVR;
+
+// Выход из VR при тапе по экрану
+document.getElementById('gameCanvas').addEventListener('click', () => {
+    if (isVR) toggleVR();
+});
+
+// Слушаем системный выход из Fullscreen (например по кнопке "Назад" на телефоне)
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && isVR) {
+        isVR = false;
+        document.getElementById('ui').style.display = 'block';
+        document.body.style.cursor = 'default';
+    }
+});
 
 document.getElementById('skill-slider').oninput = (e) => {
     skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
