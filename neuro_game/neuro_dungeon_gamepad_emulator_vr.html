@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.1: VR Pro Link</title>
+    <title>Neuro Reactor v8.2: VR Telekinesis Board</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -37,7 +37,8 @@
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff;">NEURO REACTOR v8.1 VR</h1>
+    <h1 style="color:#0ff;">NEURO REACTOR v8.2 VR</h1>
+    <p style="color:#888; max-width: 400px; font-size: 14px;">(Pz-Electrode Optimized: Focus on the whole maze. Mentally rotate and shift the board itself, not the player.)</p>
     <button id="btn-start" class="btn">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
 </div>
@@ -75,7 +76,7 @@ ELECTRODES.forEach(e => {
 function fft(re, im) { 
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
-        if (j > i) [re[i], re[j]] = [re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
+        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
         let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
     }
     for (let s = 2; s <= n; s <<= 1) {
@@ -85,8 +86,7 @@ function fft(re, im) {
             for (let j = 0; j < m; j++) {
                 let u = i + j, v = u + m;
                 let tr = ar * re[v] - ai * im[v], ti = ar * im[v] + ai * re[v];
-                re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti;
-                [ar, ai] =[ar * wr - ai * wi, ar * wi + ai * wr];
+                re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti;[ar, ai] =[ar * wr - ai * wi, ar * wi + ai * wr];
             }
         }
     }
@@ -220,20 +220,28 @@ class Maze {
     }
 }
 
-function drawScene(ctx, width, height, parallaxOffset) {
-    const cellSize = 80;
+function drawScene(ctx, width, height, playerDisparity) {
+    // Вычисляем динамический зум: лабиринт всегда должен целиком помещаться на экране
+    // Мы делим размер окна на диагональ лабиринта (dim * 2.2 для запаса)
+    const baseSize = Math.min(width, height);
+    const cellSize = baseSize / (maze.dim * 1.8); 
     
-    // Лабиринт (дальний план)
+    // Отрисовка лабиринта (лежит строго в фокальной плоскости, смещение = 0)
+    // Это полностью убирает эффект "двоения стен"
     ctx.save(); 
     ctx.translate(width/2, height/2); 
     ctx.rotate(-player.angle); 
-    ctx.translate(-player.x*cellSize + parallaxOffset * 1.5, -player.y*cellSize);
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
+    // Подложка, чтобы лабиринт выглядел как цельная парящая "доска"
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(-cellSize, -cellSize, (maze.dim+2)*cellSize, (maze.dim+2)*cellSize);
     
     for(let r=0; r<maze.dim; r++){ 
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) { 
                 ctx.fillStyle = '#111'; ctx.fillRect(c*cellSize, r*cellSize, cellSize+1, cellSize+1); 
-                ctx.strokeStyle = '#222'; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
             }
             else if(maze.grid[r][c] === 2) { 
                 ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill(); 
@@ -242,25 +250,24 @@ function drawScene(ctx, width, height, parallaxOffset) {
     }
     ctx.restore();
 
-    // Игрок (ближний план)
+    // Отрисовка игрока (микро-сдвиг для 3D: кажется, что он парит над доской)
     ctx.save(); 
-    ctx.translate(width/2, height/2); 
-    ctx.translate(parallaxOffset * 0.2, 0);
-    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(-5, -5); ctx.lineTo(5, -5); ctx.fill();
+    ctx.translate(width/2 + playerDisparity, height/2); 
+    let pSize = cellSize * 0.3; // Размер игрока зависит от масштаба доски
+    ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, pSize, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize); ctx.lineTo(-pSize/3, -pSize/3); ctx.lineTo(pSize/3, -pSize/3); ctx.fill();
     ctx.restore();
 
-    // Минималистичный внутриигровой HUD
+    // HUD (без смещения, 0 disparity, чтобы текст не двоился и читался идеально четко)
     if (isVR) {
         ctx.save();
-        ctx.translate(width / 2 - 75, height - 80);
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(0, 0, 150, 50);
-        ctx.fillStyle = '#0f0'; ctx.font = '12px monospace'; ctx.fillText('SYNAPSE PERSISTENCE', 10, 15);
-        ctx.fillStyle = '#111'; ctx.fillRect(10, 25, 130, 8);
-        ctx.fillStyle = '#0ff'; ctx.fillRect(10, 25, 130 * synapticPersistence, 8);
-        // Подсказка выхода
-        ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.fillText('TAP SCREEN TO EXIT VR', 10, 45);
+        ctx.translate(width / 2 - 75, height - 70);
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, 150, 45);
+        ctx.fillStyle = '#0f0'; ctx.font = '12px monospace'; ctx.fillText('SYNAPTIC STABILITY', 10, 15);
+        ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
+        ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
+        ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.fillText('TAP TO EXIT', 45, 40);
         ctx.restore();
     }
 }
@@ -272,23 +279,25 @@ function render() {
 
     if (isVR) {
         const halfW = cvs.width / 2;
-        const ipd = 12; // Смещение зрачков для 3D глубины
+        // Значение disparity очень маленькое (3px) — достаточно для ощущения глубины (Pop-out), 
+        // но абсолютно комфортно для глаз. Стены лабиринта не смещаются вообще.
+        const playerDisparity = 3; 
 
-        // Левый глаз
+        // Левый глаз (сдвигаем игрока чуть вправо)
         ctx.save();
         ctx.beginPath(); ctx.rect(0, 0, halfW, cvs.height); ctx.clip();
-        drawScene(ctx, halfW, cvs.height, ipd);
+        drawScene(ctx, halfW, cvs.height, playerDisparity);
         ctx.restore();
 
-        // Правый глаз
+        // Правый глаз (сдвигаем игрока чуть влево)
         ctx.save();
         ctx.beginPath(); ctx.rect(halfW, 0, halfW, cvs.height); ctx.clip();
         ctx.translate(halfW, 0);
-        drawScene(ctx, halfW, cvs.height, -ipd);
+        drawScene(ctx, halfW, cvs.height, -playerDisparity);
         ctx.restore();
 
-        // Разделительная линия
-        ctx.fillStyle = '#000';
+        // Разделительная полоса по центру экрана телефона
+        ctx.fillStyle = '#020202';
         ctx.fillRect(halfW - 2, 0, 4, cvs.height);
     } else {
         drawScene(ctx, cvs.width, cvs.height, 0);
@@ -302,20 +311,14 @@ function toggleVR() {
     const docEl = document.documentElement;
 
     if (isVR) {
-        ui.style.display = 'none'; // Полностью прячем интерфейс
-        document.body.style.cursor = 'none'; // Прячем курсор мыши
-        
-        // Переход в Fullscreen (убирает адресную строку)
+        ui.style.display = 'none'; 
+        document.body.style.cursor = 'none'; 
         if (docEl.requestFullscreen) docEl.requestFullscreen();
         else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
-        
-        // Попытка заблокировать экран в горизонтальном положении
         try { screen.orientation.lock("landscape").catch(()=>{}); } catch(e){}
     } else {
-        ui.style.display = 'block'; // Возвращаем интерфейс
+        ui.style.display = 'block'; 
         document.body.style.cursor = 'default';
-        
-        // Выход из Fullscreen
         if (document.fullscreenElement) {
             if (document.exitFullscreen) document.exitFullscreen();
             else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
@@ -324,13 +327,7 @@ function toggleVR() {
 }
 
 document.getElementById('vr-toggle').onclick = toggleVR;
-
-// Выход из VR при тапе по экрану
-document.getElementById('gameCanvas').addEventListener('click', () => {
-    if (isVR) toggleVR();
-});
-
-// Слушаем системный выход из Fullscreen (например по кнопке "Назад" на телефоне)
+document.getElementById('gameCanvas').addEventListener('click', () => { if (isVR) toggleVR(); });
 document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement && isVR) {
         isVR = false;
