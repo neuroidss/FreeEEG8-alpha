@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v9.2: Zen Audio Fix</title>
+    <title>Neuro Reactor v9.0: Logarithmic Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -33,7 +33,7 @@
         
         #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; margin-top: 15px; }
         
-        #btn-hide-ui { position: absolute; bottom: 20px; right: 20px; z-index: 20; background: #000; border: 2px solid #0f0; color: #0f0; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 0 10px #0f0; display: flex; justify-content: center; align-items: center; opacity: 0.5; }
+        #btn-hide-ui { position: absolute; bottom: 20px; right: 20px; z-index: 20; background: #000; border: 2px solid #0f0; color: #0f0; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 0 10px #0f0; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
@@ -69,10 +69,11 @@
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.2</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.0</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Zen Audio & Benchmark Edition.<br>
-        Put on headphones. Pure sound = Pure Focus.
+        Logarithmic Benchmark Edition (0-1000 NE-Score).<br>
+        High-granularity skill tracking.<br>
+        Random outcomes are heavily penalized but measurable.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -81,73 +82,6 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- AUDIO ИНИЦИАЛИЗАЦИЯ (ФИКС AUTOPLAY) ---
-class NeuroReactor { 
-    constructor() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.masterGain = this.ctx.createGain(); 
-        this.masterGain.connect(this.ctx.destination);
-        this.masterGain.gain.value = 1.0; // Общая громкость
-
-        // Аккорд До-мажор (C3, E3, G3, C4, E4, G4, C5, E5)
-        // 130.81 Гц отлично звучит на мобильных динамиках
-        const majorChord =[0, 4, 7, 12, 16, 19, 24, 28]; 
-        
-        this.voices = ELECTRODES.map((pos, i) => {
-            let osc = this.ctx.createOscillator(); 
-            let gain = this.ctx.createGain(); 
-            let panner;
-
-            // Кроссбраузерный Panner (для поддержки старых iOS Safari)
-            if (this.ctx.createStereoPanner) {
-                panner = this.ctx.createStereoPanner();
-                panner.pan.value = pos.x / RADIUS;
-            } else {
-                panner = this.ctx.createPanner();
-                panner.panningModel = 'equalpower';
-                panner.setPosition(pos.x / RADIUS, 0, 1 - Math.abs(pos.x / RADIUS));
-            }
-
-            osc.type = 'sine'; // Чистая синусоида для эффекта медитации
-            let baseFreq = 130.81 * Math.pow(2, majorChord[i] / 12);
-            osc.frequency.value = baseFreq;
-            gain.gain.value = 0; // Изначально тишина
-
-            osc.connect(gain).connect(panner).connect(this.masterGain);
-            osc.start(); 
-            
-            return { osc, gain, baseFreq };
-        });
-    }
-    update(vx, vy, tq, stability) {
-        if(this.ctx.state === 'suspended') this.ctx.resume();
-        const t = this.ctx.currentTime;
-        this.voices.forEach((v, i) => {
-            // electrodePressure обычно около 2-7. 
-            let targetGain = (electrodePressure[i] / 7) * 0.15;
-            if (targetGain > 0.2) targetGain = 0.2; // Ограничитель
-            
-            v.gain.gain.setTargetAtTime(targetGain, t, 0.1);
-            
-            // Расстройка звука: чистый контроль = чистый аккорд. Плохой = диссонанс.
-            let detune = (1 - stability) * 15; 
-            v.osc.frequency.setTargetAtTime(v.baseFreq + detune + (tq * 10), t, 0.2);
-        });
-    }
-}
-
-// Запуск аудио при первом же клике по экрану!
-let reactor = null;
-function initAudio() {
-    if (!reactor) {
-        reactor = new NeuroReactor();
-    }
-    if (reactor.ctx.state === 'suspended') {
-        reactor.ctx.resume();
-    }
-}
-
-// --- WAKE LOCK ---
 let wakeLock = null;
 async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {} }
 document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock(); });
@@ -167,13 +101,13 @@ let isConnected = false, skillLevel = 0.05, zoomLevel = 80, synapticPersistence 
 let lastTargetX = 0, lastTargetY = 0;
 let ctrl = { moveX: 0, moveY: 0, torque: 0 };
 let player = { x: 1.5, y: 1.5, angle: 0 };
-let maze;
+let maze, reactor;
 let isVR = false; 
 let invertDevice = false;
 let uiVisible = true;
 
 let effortDist = 0;
-let scoresHistory =[];
+let scoresHistory = [];
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
@@ -181,14 +115,11 @@ ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 document.getElementById('skill-slider').oninput = (e) => { skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3); };
 document.getElementById('zoom-slider').oninput = (e) => { zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel; };
 
-const toggleUI = () => {
+document.getElementById('btn-hide-ui').onclick = () => {
     uiVisible = !uiVisible;
     document.getElementById('ui').classList.toggle('hidden', !uiVisible);
     document.getElementById('btn-hide-ui').style.opacity = uiVisible ? '1' : '0.5';
 };
-
-document.getElementById('btn-hide-ui').onclick = toggleUI;
-document.addEventListener('keydown', (e) => { if(e.key === 'h' || e.key === 'H') toggleUI(); });
 
 function drawRadar() {
     const radar = document.getElementById('radar');
@@ -247,6 +178,29 @@ function get_ciPLV(idxA, idxB) {
     return denom < 0.001 ? 0 : mIm / denom;
 }
 
+class NeuroReactor { 
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain(); this.masterGain.connect(this.ctx.destination);
+        this.voices = ELECTRODES.map((pos, i) => {
+            let osc = this.ctx.createOscillator(); let gain = this.ctx.createGain(); let pan = this.ctx.createStereoPanner();
+            osc.type = 'triangle'; osc.frequency.value = 40 + i * 10;
+            gain.gain.value = 0; pan.pan.value = pos.x / RADIUS;
+            osc.connect(gain).connect(pan).connect(this.masterGain);
+            osc.start(); return { osc, gain, baseFreq: 40 + i * 10 };
+        });
+    }
+    update(vx, vy, tq, stability) {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const t = this.ctx.currentTime;
+        this.voices.forEach((v, i) => {
+            let targetGain = (electrodePressure[i] / 15) * (0.2 + stability * 0.8);
+            v.gain.gain.setTargetAtTime(targetGain * 0.3, t, 0.1);
+            v.osc.frequency.setTargetAtTime(v.baseFreq + (vx + vy) * 10 + tq * 15, t, 0.1);
+        });
+    }
+}
+
 class Maze {
     constructor(dim) {
         this.dim = dim;
@@ -261,7 +215,7 @@ class Maze {
             let exitParams = this.findHardestExit();
             if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
                 bestExit = exitParams;
-                bestGrid = this.grid.map(row =>[...row]);
+                bestGrid = this.grid.map(row => [...row]);
             }
             if (exitParams.d >= 20 && exitParams.turns >= 5) { isValid = true; }
         }
@@ -340,8 +294,6 @@ function gameLoop(time) {
         if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.05);
         else synapticPersistence *= 0.95;
         lastTargetX = target_vx; lastTargetY = target_vy;
-        
-        // ЗВУК ОБНОВЛЯЕТСЯ ЗДЕСЬ
         if(reactor) reactor.update(target_vx, target_vy, target_tq, synapticPersistence);
     }
 
@@ -393,12 +345,14 @@ function gameLoop(time) {
         if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) player.y += sdy; 
     }
 
+    // --- ЛОГАРИФМИЧЕСКИЙ NE-SCORE ---
     let wastedRatio = Math.max(1, effortDist / maze.optimalDist);
+    // Score = 1000 - 100 * log2(wastedRatio). Константа 144.27 = 100 / ln(2)
     let neScore = 1000 - 144.27 * Math.log(wastedRatio);
     if (neScore < 0) neScore = 0;
     
     let scoreColor = neScore > 900 ? '#0f0' : (neScore > 700 ? '#ff0' : '#f00');
-    document.getElementById('lbl-ne-score').innerText = neScore.toFixed(1); 
+    document.getElementById('lbl-ne-score').innerText = neScore.toFixed(1); // Без округления!
     document.getElementById('lbl-ne-score').style.color = scoreColor;
 
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
@@ -548,27 +502,18 @@ function startGame() {
     gameLoop();
 }
 
-// Запуск инициализации звука даже без BLE
-document.getElementById('btn-skip').onclick = () => { 
-    initAudio(); 
-    startGame(); 
-};
+document.getElementById('btn-skip').onclick = () => { startGame(); };
 
-// Строгое инициирование аудио при клике на старт
 document.getElementById('btn-start').onclick = async () => {
-    initAudio(); // 1. Аудио контекст запускается ДО асинхронного Bluetooth!
-    
     try {
-        const device = await navigator.bluetooth.requestDevice({ filters:[{ services:["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] }] });
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] }] });
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
         const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
-        
         await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22]));
         await new Promise(r => setTimeout(r, 100));
         await cmdChar.writeValue(new Uint8Array([0x05, 0x22, 0x22]));
-        
         await dataChar.startNotifications();
         dataChar.addEventListener('characteristicvaluechanged', (e) => {
             let b = new Uint8Array(e.target.value.buffer);
@@ -580,7 +525,7 @@ document.getElementById('btn-start').onclick = async () => {
                 }
             }
         });
-        
+        reactor = new NeuroReactor(); 
         startGame();
     } catch(e) { alert(e); }
 };
