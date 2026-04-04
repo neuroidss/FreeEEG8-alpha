@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v9.0: Logarithmic Benchmark</title>
+    <title>Neuro Reactor v8.10: ARC-AGI Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -25,7 +25,6 @@
 
         .analytics { margin-top: 15px; padding-top: 15px; border-top: 2px dashed #0f0; }
         .analytics .stat { color: #ff0; }
-        .analytics .highlight { font-size: 16px; }
 
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
         .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
@@ -42,9 +41,9 @@
     <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
     
     <div class="analytics">
-        <div class="stat" style="color:#0ff">NE-SCORE: <span id="lbl-ne-score" class="highlight">1000</span></div>
-        <div class="stat">AVG SCORE: <span id="lbl-avg-score" class="highlight">--</span></div>
-        <div class="stat">BEST SCORE: <span id="lbl-best-score" class="highlight">--</span></div>
+        <div class="stat" style="color:#0ff">ARC SCORE: <span id="lbl-live-acc" class="highlight">100%</span></div>
+        <div class="stat">AVG SCORE: <span id="lbl-avg-acc" class="highlight">--%</span></div>
+        <div class="stat">BEST SCORE: <span id="lbl-best-acc" class="highlight">--%</span></div>
     </div>
 
     <div class="stat" style="margin-top:15px;">SYNAPTIC TRACE:</div>
@@ -69,11 +68,11 @@
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.0</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.10</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Logarithmic Benchmark Edition (0-1000 NE-Score).<br>
-        Constant 11x11 Complex Maze.<br>
-        Strict Anti-Tunneling & Anti-Random Physics.
+        ARC-AGI Benchmark Edition.<br>
+        Strict Intent/Effort tracking applied.<br>
+        Random brute-force is rigorously penalized to 0%.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -107,7 +106,7 @@ let invertDevice = false;
 let uiVisible = true;
 
 let effortDist = 0;
-let scoresHistory = [];
+let scoresHistory =[];
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
@@ -205,23 +204,23 @@ class Maze {
     constructor(dim) {
         this.dim = dim;
         this.optimalDist = 0;
-        let attempts = 0, isValid = false, bestExit = null, bestGrid = null;
+        
+        let isValid = false;
+        let attempts = 0;
+        let bestExit = null;
+        let bestGrid = null;
 
-        while(!isValid && attempts < 100) {
+        while(!isValid && attempts < 200) {
             attempts++;
             this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
             this.gen(1, 1);
             
             let exitParams = this.findHardestExit();
-            
             if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
                 bestExit = exitParams;
                 bestGrid = this.grid.map(row => [...row]);
             }
-
-            if (exitParams.d >= 20 && exitParams.turns >= 5) {
-                isValid = true;
-            }
+            if (exitParams.d >= 20 && exitParams.turns >= 5) { isValid = true; }
         }
         
         this.grid = bestGrid;
@@ -251,6 +250,7 @@ class Maze {
             if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
                 maxScore = score; best = curr;
             }
+
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
                 let nx = curr.x + dx, ny = curr.y + dy;
                 if (nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1) {
@@ -318,10 +318,18 @@ function gameLoop(time) {
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
     let strafeSpeed = ctrl.moveX * boost * 0.2;
     
-    let targetDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
-    let targetDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
-
-    effortDist += Math.sqrt(targetDx*targetDx + targetDy*targetDy);
+    let rawDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let rawDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
+    
+    effortDist += Math.sqrt(rawDx*rawDx + rawDy*rawDy);
+    
+    const MAX_SPEED = 0.15;
+    let intendedMove = Math.sqrt(rawDx*rawDx + rawDy*rawDy);
+    let targetDx = rawDx, targetDy = rawDy;
+    if (intendedMove > MAX_SPEED) {
+        targetDx = (rawDx / intendedMove) * MAX_SPEED;
+        targetDy = (rawDy / intendedMove) * MAX_SPEED;
+    }
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
@@ -340,21 +348,25 @@ function gameLoop(time) {
         if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) player.y += sdy; 
     }
 
-    let wastedRatio = Math.max(1, effortDist / maze.optimalDist);
-    let neScore = Math.max(0, Math.round(1000 - 100 * Math.log(wastedRatio)));
+    let currentEfficiency = 100;
+    if (effortDist > maze.optimalDist) {
+        let excess = effortDist - maze.optimalDist;
+        let tolerance = maze.optimalDist * 2.0; 
+        currentEfficiency = Math.max(0, Math.round(100 * (1 - (excess / tolerance))));
+    }
     
-    let accColor = neScore > 900 ? '#0f0' : (neScore > 750 ? '#ff0' : '#f00');
-    document.getElementById('lbl-ne-score').innerText = neScore;
-    document.getElementById('lbl-ne-score').style.color = accColor;
+    let accColor = currentEfficiency > 79 ? '#0f0' : (currentEfficiency > 39 ? '#ff0' : '#f00');
+    document.getElementById('lbl-live-acc').innerText = currentEfficiency + "%";
+    document.getElementById('lbl-live-acc').style.color = accColor;
 
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        scoresHistory.push(neScore);
+        scoresHistory.push(currentEfficiency);
         
         let avgScore = Math.round(scoresHistory.reduce((a,b)=>a+b,0) / scoresHistory.length);
         let bestScore = Math.max(...scoresHistory);
         
-        document.getElementById('lbl-avg-score').innerText = avgScore;
-        document.getElementById('lbl-best-score').innerText = bestScore;
+        document.getElementById('lbl-avg-acc').innerText = avgScore + "%";
+        document.getElementById('lbl-best-acc').innerText = bestScore + "%";
         
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
@@ -415,9 +427,9 @@ function drawScene(ctx, width, height, playerDisparity) {
         ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
         ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
         
-        let liveScore = document.getElementById('lbl-ne-score').innerText;
-        ctx.fillStyle = document.getElementById('lbl-ne-score').style.color; 
-        ctx.font = '14px monospace'; ctx.fillText('NE-SCORE: ' + liveScore, 10, 45);
+        let liveAcc = document.getElementById('lbl-live-acc').innerText;
+        ctx.fillStyle = document.getElementById('lbl-live-acc').style.color; 
+        ctx.font = '14px monospace'; ctx.fillText('ARC SCORE: ' + liveAcc, 10, 45);
         ctx.restore();
     }
 }
