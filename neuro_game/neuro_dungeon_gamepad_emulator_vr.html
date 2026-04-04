@@ -3,13 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.6: Expo VR Final</title>
+    <title>Neuro Reactor v8.7: Benchmark & Expo Edition</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
         
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: opacity 0.3s; }
-        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
+        /* UI Panel - Теперь сворачиваемая! */
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { transform: translateX(-120%); opacity: 0; pointer-events: none; }
+        
+        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+        .highlight { color: #fff; font-size: 14px; font-weight: bold; }
+        
         #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
         #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.1s linear; }
         #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #080808; }
@@ -19,45 +24,59 @@
         .slider-box { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
         input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
 
+        /* Раздел Аналитики / Бенчмарка */
+        .analytics { margin-top: 15px; padding-top: 15px; border-top: 2px dashed #0f0; }
+        .analytics .stat { color: #ff0; }
+
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
         .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
         .btn:active { background: #0f0; color: #000; }
         
         #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; margin-top: 15px; }
-        #btn-invert { margin-top: 10px; }
+        
+        /* Кнопка скрытия UI для мобилок */
+        #btn-hide-ui { position: absolute; bottom: 20px; right: 20px; z-index: 20; background: #000; border: 2px solid #0f0; color: #0f0; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 0 10px #0f0; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff; font-size: 16px; font-weight: bold;">1</span></div>
-    <div class="stat">SYNAPTIC TRACE:</div>
+    <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
+    
+    <!-- НОВЫЙ БЛОК БЕНЧМАРКА СКИЛЛА -->
+    <div class="analytics">
+        <div class="stat" style="color:#0ff">EFFICIENCY: <span id="lbl-live-acc" class="highlight">100%</span></div>
+        <div class="stat">AVG ACCURACY: <span id="lbl-avg-acc" class="highlight">--%</span></div>
+        <div class="stat">BEST SCORE: <span id="lbl-best-acc" class="highlight">--%</span></div>
+    </div>
+
+    <div class="stat" style="margin-top:15px;">SYNAPTIC TRACE:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
     <div id="radar"></div>
     <div class="stat">WS: <span id="ws-st" style="color:red">OFF</span></div>
     
     <div class="slider-box">
-        <div class="stat" style="font-size: 10px;"><span>REACTIVE LVL</span><span id="lbl-skill">0.05</span></div>
+        <div class="stat" style="font-size: 10px;"><span style="color:#0f0">REACTIVE LVL</span><span id="lbl-skill">0.05</span></div>
         <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
     </div>
 
-    <!-- Ползунок масштаба для калибровки под глаза пользователя -->
     <div class="slider-box">
-        <div class="stat" style="font-size: 10px;"><span>CAMERA ZOOM</span><span id="lbl-zoom">80</span></div>
+        <div class="stat" style="font-size: 10px;"><span style="color:#0f0">CAMERA ZOOM</span><span id="lbl-zoom">80</span></div>
         <input type="range" id="zoom-slider" min="20" max="150" step="1" value="80">
     </div>
     
-    <!-- Инверсия осей -->
     <button id="btn-invert" class="btn">USB CABLE: TOP</button>
     <button id="vr-toggle" class="btn">ENTER VR MODE</button>
 </div>
 
+<!-- Кнопка скрытия UI -->
+<div id="btn-hide-ui">👁️</div>
+
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.6</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.7</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Expo Edition: Constant 9x9 Maze.<br>
-        Physics & Optic Flow Optimized.<br>
-        If USB points down, use "USB CABLE" toggle.
+        Expo & Benchmark Edition.<br>
+        Built-in Anti-Random Path Efficiency Tracker.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -66,14 +85,10 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === АНТИ-СОН ЭКРАНА (WAKE LOCK) ===
+// --- WAKE LOCK ---
 let wakeLock = null;
 async function requestWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-        }
-    } catch (err) {}
+    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {}
 }
 document.addEventListener('visibilitychange', async () => {
     if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
@@ -97,19 +112,25 @@ let player = { x: 1.5, y: 1.5, angle: 0 };
 let maze, reactor;
 let isVR = false; 
 let invertDevice = false;
+let uiVisible = true;
+
+// --- АНАЛИТИКА СКИЛЛА ---
+let actualDist = 0;
+let scoresHistory =[];
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 
-// Слайдеры
-document.getElementById('skill-slider').oninput = (e) => {
-    skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
-};
-document.getElementById('zoom-slider').oninput = (e) => {
-    zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel;
+// UI Слайдеры и Кнопки
+document.getElementById('skill-slider').oninput = (e) => { skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3); };
+document.getElementById('zoom-slider').oninput = (e) => { zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel; };
+
+document.getElementById('btn-hide-ui').onclick = () => {
+    uiVisible = !uiVisible;
+    document.getElementById('ui').classList.toggle('hidden', !uiVisible);
+    document.getElementById('btn-hide-ui').style.opacity = uiVisible ? '1' : '0.5';
 };
 
-// Отрисовка радара с учетом инверсии
 function drawRadar() {
     const radar = document.getElementById('radar');
     radar.innerHTML = '<div id="pointer"></div>';
@@ -190,6 +211,56 @@ class NeuroReactor {
     }
 }
 
+// === УМНЫЙ ГЕНЕРАТОР ЛАБИРИНТА С БЕНЧМАРКОМ ===
+class Maze {
+    constructor(dim) {
+        this.dim = dim;
+        this.optimalDist = 0;
+        
+        // Anti-Random Protection: Генерируем лабиринт до тех пор, пока идеальный путь не станет >= 14 шагам
+        // Это гарантирует, что случайным блужданием дойти до выхода будет крайне сложно.
+        do {
+            this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+            this.gen(1, 1);
+            this.grid[dim-2][dim-2] = 2; // Финиш
+            this.optimalDist = this.calculateOptimalPath();
+        } while(this.optimalDist < 14);
+    }
+    
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+
+    // Breadth-First Search (BFS) для нахождения идеального пути
+    calculateOptimalPath() {
+        let q = [{x:1, y:1, d:0}];
+        let visited = Array.from({length: this.dim}, () => Array(this.dim).fill(false));
+        visited[1][1] = true;
+        while(q.length > 0) {
+            let curr = q.shift();
+            if (curr.x === this.dim-2 && curr.y === this.dim-2) return curr.d; // Нашли финиш
+            
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
+                let nx = curr.x + dx, ny = curr.y + dy;
+                // Проверяем возможность шага (0 - коридор, 2 - финиш)
+                if (nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1) {
+                    if (!visited[ny][nx] && this.grid[ny][nx] !== 1) {
+                        visited[ny][nx] = true;
+                        q.push({x:nx, y:ny, d:curr.d + 1});
+                    }
+                }
+            });
+        }
+        return 0; 
+    }
+}
+
 let lastEegProcess = 0;
 let target_vx = 0, target_vy = 0, target_tq = 0;
 
@@ -237,7 +308,7 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // Физика движения
+    // --- ФИЗИКА ДВИЖЕНИЯ И ТРЕКИНГ АНАЛИТИКИ ---
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
@@ -252,40 +323,53 @@ function gameLoop(time) {
         return maze.grid[gy][gx] === 1;
     };
     
-    // Фикс скольжения по стенам (позволяет легко "обтекать" углы)
-    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) player.x += dx;
-    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) player.y += dy;
+    let movedX = 0, movedY = 0;
+    if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) { player.x += dx; movedX = dx; }
+    if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) { player.y += dy; movedY = dy; }
+
+    // Трекинг пройденного расстояния (только фактическое успешное движение)
+    actualDist += Math.sqrt(movedX*movedX + movedY*movedY);
+
+    // ОБНОВЛЕНИЕ LIVE EFFICIENCY
+    // Если actualDist <= optimalDist, игрок идет идеально -> 100%
+    // Если actualDist > optimalDist (свернул не туда), процент начинает падать
+    let currentEfficiency = 100;
+    if (actualDist > maze.optimalDist) {
+        currentEfficiency = Math.max(0, Math.round((maze.optimalDist / actualDist) * 100));
+    }
+    
+    // Меняем цвет текста в зависимости от качества контроля
+    let accColor = currentEfficiency > 80 ? '#0f0' : (currentEfficiency > 50 ? '#ff0' : '#f00');
+    document.getElementById('lbl-live-acc').innerText = currentEfficiency + "%";
+    document.getElementById('lbl-live-acc').style.color = accColor;
 
     // ПЕРЕХОД НА НОВЫЙ ЭТАЖ
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
+        // Сохраняем результат
+        scoresHistory.push(currentEfficiency);
+        
+        let avgScore = Math.round(scoresHistory.reduce((a,b)=>a+b,0) / scoresHistory.length);
+        let bestScore = Math.max(...scoresHistory);
+        
+        document.getElementById('lbl-avg-acc').innerText = avgScore + "%";
+        document.getElementById('lbl-best-acc').innerText = bestScore + "%";
+        
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
-        // ЛАБИРИНТ СТРОГО 9х9 — прогрессии больше нет, конец всегда виден!
+        
+        // Генерация нового лабиринта с защитой
         maze = new Maze(9); 
         player.x = player.y = 1.5;
+        actualDist = 0; // Сброс трекера
     }
 
-    document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
-    document.getElementById('pointer').style.left = (50 + ctrl.moveX * 5) + '%';
-    document.getElementById('pointer').style.top = (50 + ctrl.moveY * 5) + '%';
+    if (uiVisible) {
+        document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
+        document.getElementById('pointer').style.left = (50 + ctrl.moveX * 5) + '%';
+        document.getElementById('pointer').style.top = (50 + ctrl.moveY * 5) + '%';
+    }
     
     render(); requestAnimationFrame(gameLoop);
-}
-
-class Maze {
-    constructor(dim) {
-        this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
-        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; // Финиш в правом нижнем углу
-    }
-    gen(x, y) {
-        this.grid[y][x] = 0;
-        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
-            let nx=x+dx*2, ny=y+dy*2;
-            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
-                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
-            }
-        });
-    }
 }
 
 function drawScene(ctx, width, height, playerDisparity) {
@@ -296,7 +380,9 @@ function drawScene(ctx, width, height, playerDisparity) {
     ctx.rotate(-player.angle); 
     ctx.translate(-player.x*cellSize, -player.y*cellSize);
     
-    // Отрисовка клеток
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(-cellSize, -cellSize, (maze.dim+2)*cellSize, (maze.dim+2)*cellSize);
+    
     for(let r=0; r<maze.dim; r++){ 
         for(let c=0; c<maze.dim; c++){
             if(maze.grid[r][c] === 1) { 
@@ -311,7 +397,6 @@ function drawScene(ctx, width, height, playerDisparity) {
     }
     ctx.restore();
 
-    // Игрок
     ctx.save(); 
     ctx.translate(width/2 + playerDisparity, height/2); 
     let pSize = cellSize * 0.25; 
@@ -319,15 +404,22 @@ function drawScene(ctx, width, height, playerDisparity) {
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize*1.5); ctx.lineTo(-pSize*0.7, pSize*0.5); ctx.lineTo(pSize*0.7, pSize*0.5); ctx.fill();
     ctx.restore();
 
+    // Минималистичный VR HUD
     if (isVR) {
         ctx.save();
-        ctx.translate(width / 2 - 75, height - 70);
+        ctx.translate(width / 2 - 75, height - 80);
         ctx.fillStyle = 'rgba(0,0,0,0.8)';
-        ctx.fillRect(0, 0, 150, 45);
+        ctx.fillRect(0, 0, 150, 60);
+        
         ctx.fillStyle = '#0f0'; ctx.font = '12px monospace'; ctx.fillText('SYNAPTIC STABILITY', 10, 15);
         ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
         ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
-        ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.fillText('TAP TO EXIT', 45, 40);
+        
+        // Показываем эффективность пути прямо в очках
+        let liveAcc = document.getElementById('lbl-live-acc').innerText;
+        ctx.fillStyle = document.getElementById('lbl-live-acc').style.color; 
+        ctx.font = '14px monospace'; ctx.fillText('ACCURACY: ' + liveAcc, 10, 45);
+        
         ctx.restore();
     }
 }
@@ -362,16 +454,19 @@ function render() {
 function toggleVR() {
     isVR = !isVR;
     const ui = document.getElementById('ui');
+    const btnHide = document.getElementById('btn-hide-ui');
     const docEl = document.documentElement;
 
     if (isVR) {
         ui.style.display = 'none'; 
+        btnHide.style.display = 'none';
         document.body.style.cursor = 'none'; 
         if (docEl.requestFullscreen) docEl.requestFullscreen();
         else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
         try { screen.orientation.lock("landscape").catch(()=>{}); } catch(e){}
     } else {
         ui.style.display = 'block'; 
+        btnHide.style.display = 'flex';
         document.body.style.cursor = 'default';
         if (document.fullscreenElement) {
             if (document.exitFullscreen) document.exitFullscreen();
@@ -386,6 +481,7 @@ document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement && isVR) {
         isVR = false;
         document.getElementById('ui').style.display = 'block';
+        document.getElementById('btn-hide-ui').style.display = 'flex';
         document.body.style.cursor = 'default';
     }
 });
@@ -393,6 +489,8 @@ document.addEventListener('fullscreenchange', () => {
 function startGame() {
     requestWakeLock(); 
     maze = new Maze(9); 
+    actualDist = 0;
+    scoresHistory =[];
     document.getElementById('overlay').style.display = 'none'; 
     isConnected = true; 
     gameLoop();
@@ -407,7 +505,6 @@ document.getElementById('btn-start').onclick = async () => {
         const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
         const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
-        // Выставляем усиление 4x (0x2222) через команды BLE
         await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22]));
         await new Promise(r => setTimeout(r, 100));
         await cmdChar.writeValue(new Uint8Array([0x05, 0x22, 0x22]));
