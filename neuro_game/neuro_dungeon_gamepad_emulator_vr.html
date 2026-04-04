@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.2: VR Telekinesis Board</title>
+    <title>Neuro Reactor v8.3: Expo Edition (No Sleep)</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -37,8 +37,8 @@
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff;">NEURO REACTOR v8.2 VR</h1>
-    <p style="color:#888; max-width: 400px; font-size: 14px;">(Pz-Electrode Optimized: Focus on the whole maze. Mentally rotate and shift the board itself, not the player.)</p>
+    <h1 style="color:#0ff;">NEURO REACTOR v8.3 VR</h1>
+    <p style="color:#888; max-width: 400px; font-size: 14px;">(Expo Mode: Screen Sleep Disabled. Wear Ch 2,3,4,5 Anterior, Ch 6,7,0,1 Posterior)</p>
     <button id="btn-start" class="btn">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
 </div>
@@ -46,6 +46,33 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
+// --- ЭКРАН НЕ ГАСНЕТ (Wake Lock API) ---
+let wakeLock = null;
+
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            console.log('Screen Wake Lock is active!');
+            
+            // Если экран блокируется системой, а потом разблокируется, лок может слететь. 
+            // Обработчик ниже переподхватывает лок.
+            wakeLock.addEventListener('release', () => {
+                console.log('Screen Wake Lock released');
+            });
+        }
+    } catch (err) {
+        console.error(`${err.name}, ${err.message}`);
+    }
+}
+
+document.addEventListener('visibilitychange', async () => {
+    if (wakeLock !== null && document.visibilityState === 'visible') {
+        await requestWakeLock(); // Восстанавливаем, если свернули браузер и вернулись
+    }
+});
+// ----------------------------------------
+
 const RADIUS = 10, CH_COUNT = 8, BUF_SIZE = 256;
 const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
@@ -221,19 +248,14 @@ class Maze {
 }
 
 function drawScene(ctx, width, height, playerDisparity) {
-    // Вычисляем динамический зум: лабиринт всегда должен целиком помещаться на экране
-    // Мы делим размер окна на диагональ лабиринта (dim * 2.2 для запаса)
     const baseSize = Math.min(width, height);
     const cellSize = baseSize / (maze.dim * 1.8); 
     
-    // Отрисовка лабиринта (лежит строго в фокальной плоскости, смещение = 0)
-    // Это полностью убирает эффект "двоения стен"
     ctx.save(); 
     ctx.translate(width/2, height/2); 
     ctx.rotate(-player.angle); 
     ctx.translate(-player.x*cellSize, -player.y*cellSize);
     
-    // Подложка, чтобы лабиринт выглядел как цельная парящая "доска"
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(-cellSize, -cellSize, (maze.dim+2)*cellSize, (maze.dim+2)*cellSize);
     
@@ -250,15 +272,13 @@ function drawScene(ctx, width, height, playerDisparity) {
     }
     ctx.restore();
 
-    // Отрисовка игрока (микро-сдвиг для 3D: кажется, что он парит над доской)
     ctx.save(); 
     ctx.translate(width/2 + playerDisparity, height/2); 
-    let pSize = cellSize * 0.3; // Размер игрока зависит от масштаба доски
+    let pSize = cellSize * 0.3; 
     ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(0, 0, pSize, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize); ctx.lineTo(-pSize/3, -pSize/3); ctx.lineTo(pSize/3, -pSize/3); ctx.fill();
     ctx.restore();
 
-    // HUD (без смещения, 0 disparity, чтобы текст не двоился и читался идеально четко)
     if (isVR) {
         ctx.save();
         ctx.translate(width / 2 - 75, height - 70);
@@ -279,24 +299,19 @@ function render() {
 
     if (isVR) {
         const halfW = cvs.width / 2;
-        // Значение disparity очень маленькое (3px) — достаточно для ощущения глубины (Pop-out), 
-        // но абсолютно комфортно для глаз. Стены лабиринта не смещаются вообще.
         const playerDisparity = 3; 
 
-        // Левый глаз (сдвигаем игрока чуть вправо)
         ctx.save();
         ctx.beginPath(); ctx.rect(0, 0, halfW, cvs.height); ctx.clip();
         drawScene(ctx, halfW, cvs.height, playerDisparity);
         ctx.restore();
 
-        // Правый глаз (сдвигаем игрока чуть влево)
         ctx.save();
         ctx.beginPath(); ctx.rect(halfW, 0, halfW, cvs.height); ctx.clip();
         ctx.translate(halfW, 0);
         drawScene(ctx, halfW, cvs.height, -playerDisparity);
         ctx.restore();
 
-        // Разделительная полоса по центру экрана телефона
         ctx.fillStyle = '#020202';
         ctx.fillRect(halfW - 2, 0, 4, cvs.height);
     } else {
@@ -304,7 +319,6 @@ function render() {
     }
 }
 
-// Управление Fullscreen и VR
 function toggleVR() {
     isVR = !isVR;
     const ui = document.getElementById('ui');
@@ -341,6 +355,7 @@ document.getElementById('skill-slider').oninput = (e) => {
 };
 
 function startGame() {
+    requestWakeLock(); // Вызываем удержание экрана!
     maze = new Maze(9); 
     document.getElementById('overlay').style.display = 'none'; 
     isConnected = true; 
