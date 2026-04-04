@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.5: Expo VR (Physics & Zoom Restored)</title>
+    <title>Neuro Reactor v8.6: Expo VR Final</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -30,7 +30,7 @@
 <body>
 
 <div id="ui">
-    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff">1</span></div>
+    <div class="stat">FLOOR: <span id="lbl-floor" style="color:#fff; font-size: 16px; font-weight: bold;">1</span></div>
     <div class="stat">SYNAPTIC TRACE:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
     <div id="radar"></div>
@@ -41,20 +41,22 @@
         <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
     </div>
 
-    <!-- ПОЛЗУНОК МАСШТАБА (Поможет найти баланс между скоростью обучения и обзором) -->
+    <!-- Ползунок масштаба для калибровки под глаза пользователя -->
     <div class="slider-box">
         <div class="stat" style="font-size: 10px;"><span>CAMERA ZOOM</span><span id="lbl-zoom">80</span></div>
         <input type="range" id="zoom-slider" min="20" max="150" step="1" value="80">
     </div>
     
+    <!-- Инверсия осей -->
     <button id="btn-invert" class="btn">USB CABLE: TOP</button>
     <button id="vr-toggle" class="btn">ENTER VR MODE</button>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.5</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.6</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Physics & Optic Flow Restored.<br>
+        Expo Edition: Constant 9x9 Maze.<br>
+        Physics & Optic Flow Optimized.<br>
         If USB points down, use "USB CABLE" toggle.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
@@ -64,7 +66,7 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// === WAKE LOCK ===
+// === АНТИ-СОН ЭКРАНА (WAKE LOCK) ===
 let wakeLock = null;
 async function requestWakeLock() {
     try {
@@ -99,7 +101,7 @@ let invertDevice = false;
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 
-// UI Слайдеры
+// Слайдеры
 document.getElementById('skill-slider').oninput = (e) => {
     skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3);
 };
@@ -107,6 +109,7 @@ document.getElementById('zoom-slider').oninput = (e) => {
     zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel;
 };
 
+// Отрисовка радара с учетом инверсии
 function drawRadar() {
     const radar = document.getElementById('radar');
     radar.innerHTML = '<div id="pointer"></div>';
@@ -129,10 +132,10 @@ document.getElementById('btn-invert').onclick = () => {
     drawRadar();
 };
 
-function fft(re, im) { /* Без изменений */
+function fft(re, im) { 
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
-        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] = [im[j], im[i]];
+        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
         let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
     }
     for (let s = 2; s <= n; s <<= 1) {
@@ -234,7 +237,7 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // === ТА САМАЯ ИДЕНТИЧНАЯ ФИЗИКА ИЗ DUAL_STICK.HTML ===
+    // Физика движения
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
@@ -249,7 +252,7 @@ function gameLoop(time) {
         return maze.grid[gy][gx] === 1;
     };
     
-    // ФИКС СКОЛЬЖЕНИЯ ПО СТЕНАМ (Math.sign(dx)*0.1)
+    // Фикс скольжения по стенам (позволяет легко "обтекать" углы)
     if(!hit(player.x + dx + Math.sign(dx)*0.1, player.y)) player.x += dx;
     if(!hit(player.x, player.y + dy + Math.sign(dy)*0.1)) player.y += dy;
 
@@ -257,7 +260,8 @@ function gameLoop(time) {
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
-        maze = new Maze(9 + (fl > 5 ? 10 : fl*2)); // Ограничиваем рост лабиринта
+        // ЛАБИРИНТ СТРОГО 9х9 — прогрессии больше нет, конец всегда виден!
+        maze = new Maze(9); 
         player.x = player.y = 1.5;
     }
 
@@ -271,7 +275,7 @@ function gameLoop(time) {
 class Maze {
     constructor(dim) {
         this.dim = dim; this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
-        this.gen(1, 1); this.grid[dim-2][dim-2] = 2;
+        this.gen(1, 1); this.grid[dim-2][dim-2] = 2; // Финиш в правом нижнем углу
     }
     gen(x, y) {
         this.grid[y][x] = 0;
@@ -285,7 +289,6 @@ class Maze {
 }
 
 function drawScene(ctx, width, height, playerDisparity) {
-    // ВАЖНО: Используем zoomLevel из UI, а не динамический расчет. 80 = как было раньше!
     const cellSize = zoomLevel; 
     
     ctx.save(); 
@@ -404,6 +407,7 @@ document.getElementById('btn-start').onclick = async () => {
         const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
         const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
+        // Выставляем усиление 4x (0x2222) через команды BLE
         await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22]));
         await new Promise(r => setTimeout(r, 100));
         await cmdChar.writeValue(new Uint8Array([0x05, 0x22, 0x22]));
