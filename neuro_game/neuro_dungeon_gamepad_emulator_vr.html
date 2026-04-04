@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.10: ARC-AGI Benchmark</title>
+    <title>Neuro Reactor v9.0: Logarithmic Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -25,6 +25,7 @@
 
         .analytics { margin-top: 15px; padding-top: 15px; border-top: 2px dashed #0f0; }
         .analytics .stat { color: #ff0; }
+        .analytics .highlight { font-size: 16px; }
 
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
         .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
@@ -40,11 +41,10 @@
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
     
-    <!-- ARC-AGI Scoring Benchmark -->
     <div class="analytics">
-        <div class="stat" style="color:#0ff">ARC SCORE: <span id="lbl-live-acc" class="highlight">100%</span></div>
-        <div class="stat">AVG SCORE: <span id="lbl-avg-acc" class="highlight">--%</span></div>
-        <div class="stat">BEST SCORE: <span id="lbl-best-acc" class="highlight">--%</span></div>
+        <div class="stat" style="color:#0ff">NE-SCORE: <span id="lbl-ne-score" class="highlight">1000</span></div>
+        <div class="stat">AVG SCORE: <span id="lbl-avg-score" class="highlight">--</span></div>
+        <div class="stat">BEST SCORE: <span id="lbl-best-score" class="highlight">--</span></div>
     </div>
 
     <div class="stat" style="margin-top:15px;">SYNAPTIC TRACE:</div>
@@ -69,11 +69,11 @@
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.10</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.0</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        ARC-AGI Benchmark Edition.<br>
-        Strict Intent/Effort tracking applied.<br>
-        Random brute-force is rigorously penalized to 0%.
+        Logarithmic Benchmark Edition (0-1000 NE-Score).<br>
+        Constant 11x11 Complex Maze.<br>
+        Strict Anti-Tunneling & Anti-Random Physics.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -83,12 +83,8 @@
 
 <script>
 let wakeLock = null;
-async function requestWakeLock() {
-    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {}
-}
-document.addEventListener('visibilitychange', async () => {
-    if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
-});
+async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {} }
+document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock(); });
 
 const RADIUS = 10, CH_COUNT = 8, BUF_SIZE = 256;
 const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
@@ -111,7 +107,7 @@ let invertDevice = false;
 let uiVisible = true;
 
 let effortDist = 0;
-let scoresHistory =[];
+let scoresHistory = [];
 
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
@@ -209,23 +205,23 @@ class Maze {
     constructor(dim) {
         this.dim = dim;
         this.optimalDist = 0;
-        
-        let isValid = false;
-        let attempts = 0;
-        let bestExit = null;
-        let bestGrid = null;
+        let attempts = 0, isValid = false, bestExit = null, bestGrid = null;
 
-        while(!isValid && attempts < 200) {
+        while(!isValid && attempts < 100) {
             attempts++;
             this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
             this.gen(1, 1);
             
             let exitParams = this.findHardestExit();
+            
             if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
                 bestExit = exitParams;
                 bestGrid = this.grid.map(row => [...row]);
             }
-            if (exitParams.d >= 20 && exitParams.turns >= 5) { isValid = true; }
+
+            if (exitParams.d >= 20 && exitParams.turns >= 5) {
+                isValid = true;
+            }
         }
         
         this.grid = bestGrid;
@@ -247,9 +243,7 @@ class Maze {
         let q =[{x:1, y:1, d:0, dx:0, dy:0, turns:0}];
         let visited = Array.from({length: this.dim}, () => Array(this.dim).fill(false));
         visited[1][1] = true;
-        
-        let best = {x:1, y:1, d:0, turns:0};
-        let maxScore = 0;
+        let best = {x:1, y:1, d:0, turns:0}, maxScore = 0;
 
         while(q.length > 0) {
             let curr = q.shift();
@@ -257,7 +251,6 @@ class Maze {
             if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
                 maxScore = score; best = curr;
             }
-
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
                 let nx = curr.x + dx, ny = curr.y + dy;
                 if (nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1) {
@@ -320,27 +313,15 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // --- ФИЗИКА ARC-AGI: РАЗДЕЛЕНИЕ НАМЕРЕНИЯ И ФИЗИЧЕСКОГО ДВИЖЕНИЯ ---
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
     let strafeSpeed = ctrl.moveX * boost * 0.2;
     
-    let rawDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
-    let rawDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
+    let targetDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let targetDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
 
-    // Считаем полное Затраченное Усилие (намерение) ДО обрезки скорости!
-    let intendedMove = Math.sqrt(rawDx*rawDx + rawDy*rawDy);
-    effortDist += intendedMove;
-
-    // Вводим жесткий лимит физической скорости (Velocity Cap)
-    const MAX_SPEED = 0.15;
-    let targetDx = rawDx;
-    let targetDy = rawDy;
-    if (intendedMove > MAX_SPEED) {
-        targetDx = (rawDx / intendedMove) * MAX_SPEED;
-        targetDy = (rawDy / intendedMove) * MAX_SPEED;
-    }
+    effortDist += Math.sqrt(targetDx*targetDx + targetDy*targetDy);
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
@@ -348,7 +329,6 @@ function gameLoop(time) {
         return maze.grid[gy][gx] === 1;
     };
     
-    // Sub-stepping против туннелирования (микро-шаги)
     let steps = Math.ceil(Math.max(Math.abs(targetDx), Math.abs(targetDy)) / 0.05);
     if (steps < 1) steps = 1;
     
@@ -356,32 +336,25 @@ function gameLoop(time) {
     let sdy = targetDy / steps;
 
     for(let i=0; i<steps; i++) {
-        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) { player.x += sdx; }
-        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) { player.y += sdy; }
+        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) player.x += sdx; 
+        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) player.y += sdy; 
     }
 
-    // --- ARC-AGI SCORING (Жесткий бюджет усилий) ---
-    let currentEfficiency = 100;
-    if (effortDist > maze.optimalDist) {
-        let excess = effortDist - maze.optimalDist;
-        // Мы даем бюджет на ошибки: допустимо превысить идеальный путь в 2 раза.
-        let tolerance = maze.optimalDist * 2.0; 
-        currentEfficiency = Math.max(0, Math.round(100 * (1 - (excess / tolerance))));
-    }
+    let wastedRatio = Math.max(1, effortDist / maze.optimalDist);
+    let neScore = Math.max(0, Math.round(1000 - 100 * Math.log(wastedRatio)));
     
-    let accColor = currentEfficiency > 79 ? '#0f0' : (currentEfficiency > 39 ? '#ff0' : '#f00');
-    document.getElementById('lbl-live-acc').innerText = currentEfficiency + "%";
-    document.getElementById('lbl-live-acc').style.color = accColor;
+    let accColor = neScore > 900 ? '#0f0' : (neScore > 750 ? '#ff0' : '#f00');
+    document.getElementById('lbl-ne-score').innerText = neScore;
+    document.getElementById('lbl-ne-score').style.color = accColor;
 
-    // ПЕРЕХОД НА НОВЫЙ ЭТАЖ
     if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
-        scoresHistory.push(currentEfficiency);
+        scoresHistory.push(neScore);
         
         let avgScore = Math.round(scoresHistory.reduce((a,b)=>a+b,0) / scoresHistory.length);
         let bestScore = Math.max(...scoresHistory);
         
-        document.getElementById('lbl-avg-acc').innerText = avgScore + "%";
-        document.getElementById('lbl-best-acc').innerText = bestScore + "%";
+        document.getElementById('lbl-avg-score').innerText = avgScore;
+        document.getElementById('lbl-best-score').innerText = bestScore;
         
         let fl = parseInt(document.getElementById('lbl-floor').innerText) + 1;
         document.getElementById('lbl-floor').innerText = fl;
@@ -442,9 +415,9 @@ function drawScene(ctx, width, height, playerDisparity) {
         ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
         ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
         
-        let liveAcc = document.getElementById('lbl-live-acc').innerText;
-        ctx.fillStyle = document.getElementById('lbl-live-acc').style.color; 
-        ctx.font = '14px monospace'; ctx.fillText('ARC SCORE: ' + liveAcc, 10, 45);
+        let liveScore = document.getElementById('lbl-ne-score').innerText;
+        ctx.fillStyle = document.getElementById('lbl-ne-score').style.color; 
+        ctx.font = '14px monospace'; ctx.fillText('NE-SCORE: ' + liveScore, 10, 45);
         ctx.restore();
     }
 }
