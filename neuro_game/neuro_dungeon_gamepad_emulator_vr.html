@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.3: Expo Edition (No Sleep)</title>
+    <title>Neuro Reactor v8.4: Expo Edition (Orientation Fix)</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -17,10 +17,11 @@
         .node-dot { width: 4px; height: 4px; background: #333; position: absolute; border-radius: 50%; }
         
         #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
-        .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 15px 30px; font-size: 20px; cursor: pointer; border-radius: 10px; box-shadow: 0 0 15px #0f0; margin: 10px; font-family: monospace; }
+        .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
         .btn:active { background: #0f0; color: #000; }
         
-        #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; }
+        #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; margin-top: 15px; }
+        #btn-invert { margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -28,50 +29,44 @@
 <div id="ui">
     <div class="stat">SYNAPTIC PERSISTENCE:</div>
     <div id="synapse-bar"><div id="synapse-fill"></div></div>
-    <div id="radar"><div id="pointer"></div></div>
+    <div id="radar"></div>
     <div class="stat">WS: <span id="ws-st" style="color:red">OFF</span></div>
     <div class="stat">BTN: <span id="btn-st">NONE</span></div>
     <div class="stat" style="font-size:10px; margin-top:10px;">REACTIVE: <span id="lbl-skill">0.05</span></div>
     <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05" style="width:100%">
-    <button id="vr-toggle" class="btn" style="width:100%; padding: 10px; font-size: 16px; margin: 15px 0 0 0;">ENTER VR MODE</button>
+    
+    <!-- Переключатель ориентации кабеля -->
+    <button id="btn-invert" class="btn">USB CABLE: TOP</button>
+    <button id="vr-toggle" class="btn">ENTER VR MODE</button>
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff;">NEURO REACTOR v8.3 VR</h1>
-    <p style="color:#888; max-width: 400px; font-size: 14px;">(Expo Mode: Screen Sleep Disabled. Wear Ch 2,3,4,5 Anterior, Ch 6,7,0,1 Posterior)</p>
-    <button id="btn-start" class="btn">CONNECT BLE</button>
-    <button id="btn-skip" class="btn" style="border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
+    <h1 style="color:#0ff;">NEURO REACTOR v8.4 VR</h1>
+    <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
+        Expo Mode: No Sleep.<br>
+        Physical setup: Align Ch 2,3,4,5 Anterior (Front).<br>
+        If USB cable points down (180° rotation), use the "USB CABLE" toggle in the menu.
+    </p>
+    <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
+    <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- ЭКРАН НЕ ГАСНЕТ (Wake Lock API) ---
+// --- ЭКРАН НЕ ГАСНЕТ ---
 let wakeLock = null;
-
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
-            console.log('Screen Wake Lock is active!');
-            
-            // Если экран блокируется системой, а потом разблокируется, лок может слететь. 
-            // Обработчик ниже переподхватывает лок.
-            wakeLock.addEventListener('release', () => {
-                console.log('Screen Wake Lock released');
-            });
+            wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
         }
-    } catch (err) {
-        console.error(`${err.name}, ${err.message}`);
-    }
+    } catch (err) { console.error(`${err.name}, ${err.message}`); }
 }
-
 document.addEventListener('visibilitychange', async () => {
-    if (wakeLock !== null && document.visibilityState === 'visible') {
-        await requestWakeLock(); // Восстанавливаем, если свернули браузер и вернулись
-    }
+    if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
 });
-// ----------------------------------------
 
 const RADIUS = 10, CH_COUNT = 8, BUF_SIZE = 256;
 const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
@@ -91,14 +86,36 @@ let player = { x: 1.5, y: 1.5, angle: 0 };
 let maze, reactor;
 let isVR = false; 
 
+// Флаг инверсии устройства (поворот на 180 градусов)
+let invertDevice = false;
+
 let ws = new WebSocket("ws://localhost:8765");
 ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
 
-ELECTRODES.forEach(e => {
-    let dot = document.createElement('div'); dot.className = 'node-dot';
-    dot.style.left = (50 + e.x * 4) + '%'; dot.style.top = (50 + e.y * 4) + '%';
-    document.getElementById('radar').appendChild(dot);
-});
+// Отрисовка радара с учетом инверсии
+function drawRadar() {
+    const radar = document.getElementById('radar');
+    radar.innerHTML = '<div id="pointer"></div>';
+    const mult = invertDevice ? -1 : 1; // Умножаем координаты на -1 при развороте девайса
+    ELECTRODES.forEach(e => {
+        let dot = document.createElement('div'); dot.className = 'node-dot';
+        dot.style.left = (50 + e.x * 4 * mult) + '%'; 
+        dot.style.top = (50 + e.y * 4 * mult) + '%';
+        radar.appendChild(dot);
+    });
+}
+drawRadar(); // Инициализация радара
+
+// Переключатель ориентации устройства
+document.getElementById('btn-invert').onclick = () => {
+    invertDevice = !invertDevice;
+    const btn = document.getElementById('btn-invert');
+    btn.innerText = invertDevice ? "USB CABLE: BOTTOM" : "USB CABLE: TOP";
+    btn.style.borderColor = invertDevice ? "#ff0" : "#0f0";
+    btn.style.color = invertDevice ? "#ff0" : "#0f0";
+    btn.style.boxShadow = invertDevice ? "0 0 10px #ff0" : "0 0 10px #0f0";
+    drawRadar(); // Перерисовываем точки на радаре
+};
 
 function fft(re, im) { 
     const n = re.length;
@@ -184,6 +201,7 @@ function gameLoop(time) {
                 electrodePressure[i] += Math.abs(val); electrodePressure[j] += Math.abs(val);
             }
         }
+        
         let mag = Math.sqrt(target_vx**2 + target_vy**2), dot = target_vx * lastTargetX + target_vy * lastTargetY;
         let cosTheta = dot / (mag * Math.sqrt(lastTargetX**2 + lastTargetY**2) + 1e-6);
         if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.05);
@@ -192,9 +210,16 @@ function gameLoop(time) {
         if(reactor) reactor.update(target_vx, target_vy, target_tq, synapticPersistence);
     }
 
+    // ИНВЕРСИЯ ВЕКТОРОВ: Если девайс надет задом наперед, умножаем оси на -1
+    let out_vx = invertDevice ? -target_vx : target_vx;
+    let out_vy = invertDevice ? -target_vy : target_vy;
+
     let smooth = 0.98 - (skillLevel * 0.1), gain = skillLevel * 1.5, boost = (1.0 + synapticPersistence * 4.0);
-    ctrl.moveX = ctrl.moveX * smooth + target_vx * gain * (1 - smooth);
-    ctrl.moveY = ctrl.moveY * smooth + target_vy * gain * (1 - smooth);
+    
+    // Используем скорректированные векторы для движения
+    ctrl.moveX = ctrl.moveX * smooth + out_vx * gain * (1 - smooth);
+    ctrl.moveY = ctrl.moveY * smooth + out_vy * gain * (1 - smooth);
+    // Вращение (Torque) не меняется при развороте на 180 градусов!
     ctrl.torque = ctrl.torque * smooth + target_tq * gain * 0.5 * (1 - smooth);
     
     let atk = target_div < -1.8 && synapticPersistence > 0.3;
@@ -225,6 +250,7 @@ function gameLoop(time) {
     }
 
     document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
+    // Поинтер на радаре всегда совпадает с физическим направлением движения
     document.getElementById('pointer').style.left = (50 + ctrl.moveX * 5) + '%';
     document.getElementById('pointer').style.top = (50 + ctrl.moveY * 5) + '%';
     
@@ -355,7 +381,7 @@ document.getElementById('skill-slider').oninput = (e) => {
 };
 
 function startGame() {
-    requestWakeLock(); // Вызываем удержание экрана!
+    requestWakeLock(); 
     maze = new Maze(9); 
     document.getElementById('overlay').style.display = 'none'; 
     isConnected = true; 
