@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v8.9: Ultimate Benchmark</title>
+    <title>Neuro Reactor v8.10: ARC-AGI Benchmark</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -40,9 +40,10 @@
 <div id="ui">
     <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
     
+    <!-- ARC-AGI Scoring Benchmark -->
     <div class="analytics">
-        <div class="stat" style="color:#0ff">EFFICIENCY: <span id="lbl-live-acc" class="highlight">100%</span></div>
-        <div class="stat">AVG ACCURACY: <span id="lbl-avg-acc" class="highlight">--%</span></div>
+        <div class="stat" style="color:#0ff">ARC SCORE: <span id="lbl-live-acc" class="highlight">100%</span></div>
+        <div class="stat">AVG SCORE: <span id="lbl-avg-acc" class="highlight">--%</span></div>
         <div class="stat">BEST SCORE: <span id="lbl-best-acc" class="highlight">--%</span></div>
     </div>
 
@@ -68,11 +69,11 @@
 <div id="btn-hide-ui">👁️</div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.9</h1>
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v8.10</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Effort-Based Benchmark Edition.<br>
-        Constant 11x11 Complex Maze.<br>
-        Strict Anti-Tunneling & Anti-Random Physics.
+        ARC-AGI Benchmark Edition.<br>
+        Strict Intent/Effort tracking applied.<br>
+        Random brute-force is rigorously penalized to 0%.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -109,7 +110,6 @@ let isVR = false;
 let invertDevice = false;
 let uiVisible = true;
 
-// МЕТРИКА: Теперь мы считаем интеграл затраченного усилия, а не успешные шаги!
 let effortDist = 0;
 let scoresHistory =[];
 
@@ -150,7 +150,7 @@ document.getElementById('btn-invert').onclick = () => {
 function fft(re, im) { 
     const n = re.length;
     for (let i = 0, j = 0; i < n; i++) {
-        if (j > i)[re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
+        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
         let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
     }
     for (let s = 2; s <= n; s <<= 1) {
@@ -215,21 +215,17 @@ class Maze {
         let bestExit = null;
         let bestGrid = null;
 
-        while(!isValid && attempts < 100) {
+        while(!isValid && attempts < 200) {
             attempts++;
             this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
             this.gen(1, 1);
             
             let exitParams = this.findHardestExit();
-            
             if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
                 bestExit = exitParams;
                 bestGrid = this.grid.map(row => [...row]);
             }
-
-            if (exitParams.d >= 20 && exitParams.turns >= 5) {
-                isValid = true;
-            }
+            if (exitParams.d >= 20 && exitParams.turns >= 5) { isValid = true; }
         }
         
         this.grid = bestGrid;
@@ -257,11 +253,9 @@ class Maze {
 
         while(q.length > 0) {
             let curr = q.shift();
-            
             let score = curr.d + curr.turns * 3; 
             if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
-                maxScore = score;
-                best = curr;
+                maxScore = score; best = curr;
             }
 
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
@@ -326,19 +320,27 @@ function gameLoop(time) {
         ws.send(JSON.stringify({ mx: (ctrl.moveX * boost) / 10.0, my: (-ctrl.moveY * boost) / 10.0, tq: (ctrl.torque * boost) / 10.0 }));
     }
 
-    // --- ФИЗИКА С ИДЕАЛЬНОЙ МЕТРИКОЙ И СТРОГИМИ СТОЛКНОВЕНИЯМИ ---
+    // --- ФИЗИКА ARC-AGI: РАЗДЕЛЕНИЕ НАМЕРЕНИЯ И ФИЗИЧЕСКОГО ДВИЖЕНИЯ ---
     player.angle += ctrl.torque * boost * 0.5;
     
     let forwardSpeed = -ctrl.moveY * boost * 0.2;
     let strafeSpeed = ctrl.moveX * boost * 0.2;
     
-    let targetDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
-    let targetDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
+    let rawDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let rawDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
 
-    // Считаем полное Затраченное Усилие (намерение) ДО столкновений.
-    // Если игрок будет генерировать шум и давить в стены, это Усилие будет накапливаться колоссальными темпами.
-    let intendedMove = Math.sqrt(targetDx*targetDx + targetDy*targetDy);
+    // Считаем полное Затраченное Усилие (намерение) ДО обрезки скорости!
+    let intendedMove = Math.sqrt(rawDx*rawDx + rawDy*rawDy);
     effortDist += intendedMove;
+
+    // Вводим жесткий лимит физической скорости (Velocity Cap)
+    const MAX_SPEED = 0.15;
+    let targetDx = rawDx;
+    let targetDy = rawDy;
+    if (intendedMove > MAX_SPEED) {
+        targetDx = (rawDx / intendedMove) * MAX_SPEED;
+        targetDy = (rawDy / intendedMove) * MAX_SPEED;
+    }
 
     const hit = (tx, ty) => {
         let gx = Math.floor(tx), gy = Math.floor(ty);
@@ -346,7 +348,7 @@ function gameLoop(time) {
         return maze.grid[gy][gx] === 1;
     };
     
-    // Sub-stepping против туннелирования. Шаг не более 0.05
+    // Sub-stepping против туннелирования (микро-шаги)
     let steps = Math.ceil(Math.max(Math.abs(targetDx), Math.abs(targetDy)) / 0.05);
     if (steps < 1) steps = 1;
     
@@ -354,22 +356,20 @@ function gameLoop(time) {
     let sdy = targetDy / steps;
 
     for(let i=0; i<steps; i++) {
-        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) { 
-            player.x += sdx; 
-        }
-        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) { 
-            player.y += sdy; 
-        }
+        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) { player.x += sdx; }
+        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) { player.y += sdy; }
     }
 
-    // ОБНОВЛЕНИЕ LIVE EFFICIENCY
+    // --- ARC-AGI SCORING (Жесткий бюджет усилий) ---
     let currentEfficiency = 100;
     if (effortDist > maze.optimalDist) {
-        // Мы используем min(100, ...), чтобы процент не переваливал за сотню при срезке углов
-        currentEfficiency = Math.max(0, Math.min(100, Math.round((maze.optimalDist / effortDist) * 100)));
+        let excess = effortDist - maze.optimalDist;
+        // Мы даем бюджет на ошибки: допустимо превысить идеальный путь в 2 раза.
+        let tolerance = maze.optimalDist * 2.0; 
+        currentEfficiency = Math.max(0, Math.round(100 * (1 - (excess / tolerance))));
     }
     
-    let accColor = currentEfficiency > 80 ? '#0f0' : (currentEfficiency > 50 ? '#ff0' : '#f00');
+    let accColor = currentEfficiency > 79 ? '#0f0' : (currentEfficiency > 39 ? '#ff0' : '#f00');
     document.getElementById('lbl-live-acc').innerText = currentEfficiency + "%";
     document.getElementById('lbl-live-acc').style.color = accColor;
 
@@ -444,7 +444,7 @@ function drawScene(ctx, width, height, playerDisparity) {
         
         let liveAcc = document.getElementById('lbl-live-acc').innerText;
         ctx.fillStyle = document.getElementById('lbl-live-acc').style.color; 
-        ctx.font = '14px monospace'; ctx.fillText('ACCURACY: ' + liveAcc, 10, 45);
+        ctx.font = '14px monospace'; ctx.fillText('ARC SCORE: ' + liveAcc, 10, 45);
         ctx.restore();
     }
 }
