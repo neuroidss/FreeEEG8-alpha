@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Neuro Reactor v9.0: Holographic Heterarchy</title>
+    <title>Neuro Reactor v9.0: Topological Holography</title>
     <style>
         body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
@@ -71,9 +71,9 @@
 <div id="overlay">
     <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.0</h1>
     <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
-        Holographic Heterarchy Edition.<br>
-        Movement controlled by 18-36Hz ciPLV.<br>
-        Intention structure mapped by Nested 6-80Hz Theta-Gamma ciPLV.
+        Topological Holography Edition.<br>
+        100% Unrounded spatial mapping of 28 memory slots.<br>
+        Observe real-time Theta-Gamma spectra.
     </p>
     <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
     <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
@@ -91,30 +91,48 @@ const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 18
 const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
 const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
 
-// === NEW: CONSTANTS FOR NESTED ciPLV HOLOGRAPHY ===
+// === NEW: SPATIAL TOPOLOGY & TIME SPECTRA FOR ciPLV ===
 const THETA_BIN = 6;  // 6 Hz
 const GAMMA_BIN = 80; // 80 Hz
 const NUM_PAIRS = 28;
 const PAIRS = [];
-const PAIR_ANGLES =[];
+const PAIR_MIDS =[];      // Topological midpoints to prevent visual overlap
+const PAIR_OUT_VECS =[];  // Vectors pointing outward for drawing time-spectra
 
-// Pre-calculate 28 unique pairs and their vector angles
 for (let i = 0; i < 8; i++) {
     for (let j = i + 1; j < 8; j++) {
         PAIRS.push([i, j]);
-        let dx = ELECTRODES[j].x - ELECTRODES[i].x;
-        let dy = ELECTRODES[j].y - ELECTRODES[i].y;
-        PAIR_ANGLES.push(Math.atan2(dy, dx));
+        // Spatial midpoint of the pair
+        let mx = (ELECTRODES[i].x + ELECTRODES[j].x) / 2;
+        let my = (ELECTRODES[i].y + ELECTRODES[j].y) / 2;
+        PAIR_MIDS.push({x: mx, y: my});
+        
+        let len = Math.sqrt(mx*mx + my*my);
+        if (len > 0.001) {
+            PAIR_OUT_VECS.push({x: mx/len, y: my/len}); // Pointing out from center
+        } else {
+            // For the 4 cross-brain diagonals (midpoint is 0,0)
+            // Shoot the spectra along the diagonal axis itself to form a central "X"
+            let dx = ELECTRODES[j].x - ELECTRODES[i].x;
+            let dy = ELECTRODES[j].y - ELECTRODES[i].y;
+            let dlen = Math.sqrt(dx*dx + dy*dy);
+            PAIR_OUT_VECS.push({x: dx/dlen, y: dy/dlen}); 
+        }
     }
 }
 
-// Super-fast arrays for Nested ciPLV math
+// Memory arrays for Level 1 (TGC) and Level 2 (Meta)
 const META_DECAY = 0.95; 
+const tgc_re = new Float32Array(NUM_PAIRS);
+const tgc_im = new Float32Array(NUM_PAIRS);
+const tgc_val = new Float32Array(NUM_PAIRS); // Current Memory Load per pair
+const tgc_history = Array.from({length: NUM_PAIRS}, () => new Float32Array(30)); // 30-frame spectra
+
 const meta_re = new Float32Array(NUM_PAIRS * NUM_PAIRS);
 const meta_im = new Float32Array(NUM_PAIRS * NUM_PAIRS);
 const meta_ciplv = new Float32Array(NUM_PAIRS * NUM_PAIRS);
 const current_Psi = new Float32Array(NUM_PAIRS);
-// =================================================
+// =======================================================
 
 let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
 const reArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
@@ -191,7 +209,7 @@ function applyNotchFilters(re, im) {
     for(let k of[51, 102]) { for(let i=-1; i<=1; i++) { if(re[k+i]!==undefined) re[k+i]=im[k+i]=0; } }
 }
 
-// THE ORIGINAL ciPLV FUNCTION (CONTROLS MOVEMENT)
+// ORIGINAL MOVEMENT ciPLV (UNCHANGED)
 function get_ciPLV(idxA, idxB) {
     let sum_re = 0, sum_im = 0;
     for (let k = 18; k <= 36; k++) {
@@ -205,6 +223,7 @@ function get_ciPLV(idxA, idxB) {
 }
 
 class NeuroReactor { 
+    // ... [Original audio code unchanged]
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         this.masterGain = this.ctx.createGain(); this.masterGain.connect(this.ctx.destination);
@@ -228,6 +247,7 @@ class NeuroReactor {
 }
 
 class Maze {
+    // ...[Original maze generation unchanged]
     constructor(dim) {
         this.dim = dim;
         this.optimalDist = 0;
@@ -305,7 +325,7 @@ function gameLoop(time) {
             fft(reArr[c], imArr[c]); applyNotchFilters(reArr[c], imArr[c]);
         }
         
-        // --- 1. EXISTING MOVEMENT AUTOPILOT (UNCHANGED) ---
+        // --- 1. MOVEMENT AUTOPILOT (COMPLETELY UNCHANGED) ---
         target_vx = 0; target_vy = 0; target_tq = 0; electrodePressure.fill(0);
         for(let i=0; i<8; i++) {
             for(let j=i+1; j<8; j++) {
@@ -324,41 +344,42 @@ function gameLoop(time) {
         lastTargetX = target_vx; lastTargetY = target_vy;
         if(reactor) reactor.update(target_vx, target_vy, target_tq, synapticPersistence);
 
-        // --- 2. NEW: NESTED ciPLV FOR WORKING MEMORY (THETA-GAMMA) ---
+        // --- 2. MULTIDIMENSIONAL THETA-GAMMA SPECTRA (NO ROUNDING) ---
         
-        // Step A: Calculate continuous structural phase (Psi) for all 28 views
+        // LEVEL 1: Extract continuous structural phase AND Memory Load (TGC) per topological pair
         for (let p = 0; p < NUM_PAIRS; p++) {
-            let chA = PAIRS[p][0];
-            let chB = PAIRS[p][1];
+            let chA = PAIRS[p][0], chB = PAIRS[p][1];
 
-            // Pure Theta phases (6 Hz) using atan2 (no amplitudes!)
             let tA = Math.atan2(imArr[chA][THETA_BIN], reArr[chA][THETA_BIN]);
             let tB = Math.atan2(imArr[chB][THETA_BIN], reArr[chB][THETA_BIN]);
-            
-            // Pure Gamma phases (80 Hz) using atan2 (no amplitudes!)
             let gA = Math.atan2(imArr[chA][GAMMA_BIN], reArr[chA][GAMMA_BIN]);
             let gB = Math.atan2(imArr[chB][GAMMA_BIN], reArr[chB][GAMMA_BIN]);
 
-            // Cross-frequency phase difference for this spatial vector
+            // Instantaneous phase difference
             current_Psi[p] = (tA - tB) - (gA - gB); 
+            
+            // Calculate actual 1st-level TGC strength using EMA
+            tgc_re[p] = tgc_re[p] * META_DECAY + Math.cos(current_Psi[p]) * (1 - META_DECAY);
+            tgc_im[p] = tgc_im[p] * META_DECAY + Math.sin(current_Psi[p]) * (1 - META_DECAY);
+            let denom1 = Math.sqrt(Math.max(0, 1.0 - tgc_re[p]*tgc_re[p]));
+            tgc_val[p] = denom1 < 0.001 ? 0 : Math.abs(tgc_im[p] / denom1);
+            
+            // Push to rolling time-spectra history
+            tgc_history[p].copyWithin(0, 1);
+            tgc_history[p][29] = tgc_val[p];
         }
 
-        // Step B: Meta-Coherence (Correlating all 28 views across time)
+        // LEVEL 2: Meta-Coherence (Correlating all 28 views across time)
         for (let p = 0; p < NUM_PAIRS; p++) {
             for (let q = p + 1; q < NUM_PAIRS; q++) {
                 let dPsi = current_Psi[p] - current_Psi[q];
-                let idx = p * NUM_PAIRS + q; // 1D flat index for speed
+                let idx = p * NUM_PAIRS + q; // Flat 1D index
 
-                // Accumulate exponential moving average
                 meta_re[idx] = meta_re[idx] * META_DECAY + Math.cos(dPsi) * (1 - META_DECAY);
                 meta_im[idx] = meta_im[idx] * META_DECAY + Math.sin(dPsi) * (1 - META_DECAY);
 
-                // Second-level ciPLV formula (Imaginary part of phase sync)
-                let mRe = meta_re[idx];
-                let mIm = meta_im[idx];
+                let mRe = meta_re[idx], mIm = meta_im[idx];
                 let denom = Math.sqrt(Math.max(0, 1.0 - mRe * mRe));
-
-                // Final clean phase interaction of the intent structures
                 meta_ciplv[idx] = denom < 0.001 ? 0 : Math.abs(mIm / denom);
             }
         }
@@ -414,7 +435,6 @@ function gameLoop(time) {
         if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) player.y += sdy; 
     }
 
-    // --- LOGARITHMIC NE-SCORE ---
     let wastedRatio = Math.max(1, effortDist / maze.optimalDist);
     let neScore = 1000 - 144.27 * Math.log(wastedRatio);
     if (neScore < 0) neScore = 0;
@@ -474,49 +494,76 @@ function drawScene(ctx, width, height, playerDisparity) {
     }
     ctx.restore();
 
-    // Center view on player for overlay graphics
+    // Overlay Graphics relative to Player
     ctx.save(); 
     ctx.translate(width/2 + playerDisparity, height/2); 
     
-    // --- NEW: NEURAL MANDALA DRAWING (INTENTION STRUCTURE) ---
-    // Draws the Theta-Gamma Nested ciPLV network hologram
-    const MANDALA_RADIUS = cellSize * 1.5; // Expanding hologram beyond player bounds
+    // --- TOPOLOGICAL HOLOGRAM (NO ROUNDING, FULL 28 SPATIAL ORIGINS) ---
+    // Scale factor to map RADIUS=10 to screen size
+    const MANDALA_SCALE = (cellSize * 2.2) / RADIUS; 
     
-    ctx.lineWidth = 2;
+    // 1. Draw Meta-Connections (Links)
+    ctx.lineWidth = 1.5;
     for (let p = 0; p < NUM_PAIRS; p++) {
         for (let q = p + 1; q < NUM_PAIRS; q++) {
-            let idx = p * NUM_PAIRS + q;
-            let val = meta_ciplv[idx];
-            
-            // Only draw links representing strong intention coherence
-            if (val > 0.65) { 
-                let alpha = (val - 0.65) / 0.35; // Normalize to 0.0 - 1.0
-                ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`; // Cyan hologram
+            let val = meta_ciplv[p * NUM_PAIRS + q];
+            if (val > 0.6) { // Threshold to prevent visual clutter
+                let alpha = (val - 0.6) / 0.4;
+                ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`; 
                 
-                let px = Math.cos(PAIR_ANGLES[p]) * MANDALA_RADIUS;
-                let py = Math.sin(PAIR_ANGLES[p]) * MANDALA_RADIUS;
-                let qx = Math.cos(PAIR_ANGLES[q]) * MANDALA_RADIUS;
-                let qy = Math.sin(PAIR_ANGLES[q]) * MANDALA_RADIUS;
+                let px = PAIR_MIDS[p].x * MANDALA_SCALE;
+                let py = PAIR_MIDS[p].y * MANDALA_SCALE;
+                let qx = PAIR_MIDS[q].x * MANDALA_SCALE;
+                let qy = PAIR_MIDS[q].y * MANDALA_SCALE;
 
                 ctx.beginPath();
                 ctx.moveTo(px, py);
-                // Curve links towards center for beautiful web structure
-                ctx.quadraticCurveTo(0, 0, qx, qy);
+                // Straight lines show the TRUE topological connections
+                ctx.lineTo(qx, qy);
                 ctx.stroke();
             }
         }
     }
 
-    // Draw the 28 spatial nodes of the working memory
+    // 2. Draw 28 Origin Nodes & Time Spectra
     for (let p = 0; p < NUM_PAIRS; p++) {
-        let px = Math.cos(PAIR_ANGLES[p]) * MANDALA_RADIUS;
-        let py = Math.sin(PAIR_ANGLES[p]) * MANDALA_RADIUS;
-        ctx.fillStyle = 'rgba(0, 255, 128, 0.4)'; // Dim green nodes
+        let px = PAIR_MIDS[p].x * MANDALA_SCALE;
+        let py = PAIR_MIDS[p].y * MANDALA_SCALE;
+        let tgc = tgc_val[p];
+        
+        // The Memory Node
+        ctx.fillStyle = `rgba(0, 255, 128, ${0.3 + tgc*0.7})`;
         ctx.beginPath();
-        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.arc(px, py, 2 + tgc * 5, 0, Math.PI * 2);
         ctx.fill();
+        
+        // The Time-Spectra (Sparks shooting outwards)
+        ctx.beginPath();
+        let ox = PAIR_OUT_VECS[p].x;
+        let oy = PAIR_OUT_VECS[p].y;
+        
+        for(let h = 0; h < 30; h++) {
+            let hist_val = tgc_history[p][h];
+            // Step outward: h=29 is current (closest), h=0 is oldest (furthest)
+            // Reverse so oldest is furthest out
+            let dist = (29 - h) * 1.5 + 5; 
+            let sx = px + ox * dist;
+            let sy = py + oy * dist;
+            
+            // Wiggle amplitude based on memory load (hist_val)
+            // Wiggle perpendicular to outward vector (-oy, ox)
+            let wiggle = (hist_val - 0.5) * 12; 
+            let wx = sx + (-oy * wiggle);
+            let wy = sy + (ox * wiggle);
+            
+            if (h === 0) ctx.moveTo(wx, wy);
+            else ctx.lineTo(wx, wy);
+        }
+        ctx.strokeStyle = `rgba(0, 255, 128, 0.6)`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
     }
-    // ---------------------------------------------------------
+    // --------------------------------------------------------------------
 
     // Draw Player Avatar
     let pSize = cellSize * 0.25; 
