@@ -1,5 +1,15 @@
 # FreeEEG8-alpha
 
+[neuro_dungeon_gamepad_emulator_mimic](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_mimic.html)
+
+[neuro_dungeon_gamepad_emulator_crystal](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_crystal.html)
+
+[neuro_dungeon_gamepad_emulator_dash](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_dash.html)
+
+[neuro_dungeon_gamepad_emulator_wm](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_wm.html)
+
+[neuro_dungeon_gamepad_emulator_vr](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_vr.html)
+
 [neuro_dungeon_emulator](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_emulator.html)
 
 [neuro_dungeon_dual_stick](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_dual_stick.html)
