@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Neuro Reactor v9.0: Exhibition Edition</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
+        
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 240px; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { transform: translateX(-120%); opacity: 0; pointer-events: none; }
+        
+        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+        .highlight { color: #fff; font-size: 14px; font-weight: bold; }
+        
+        #synapse-bar { width: 100%; height: 6px; background: #111; margin: 10px 0; border: 1px solid #333; }
+        #synapse-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 10px #0ff; transition: width 0.1s linear; }
+        #radar { width: 100px; height: 100px; border: 1px solid #444; border-radius: 50%; margin: 10px auto; position: relative; background: #080808; }
+        #pointer { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px #fff; z-index: 10; }
+        .node-dot { width: 4px; height: 4px; background: #333; position: absolute; border-radius: 50%; }
+        
+        .slider-box { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
+        input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
+
+        .analytics { margin-top: 15px; padding-top: 15px; border-top: 2px dashed #0f0; }
+        .analytics .stat { color: #ff0; }
+        .analytics .highlight { font-size: 16px; }
+
+        #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
+        .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; box-shadow: 0 0 10px #0f0; margin: 8px; font-family: monospace; width: 100%; }
+        .btn:active { background: #0f0; color: #000; }
+        
+        #vr-toggle { background: #000; color: #f0f; border-color: #f0f; box-shadow: 0 0 10px #f0f; margin-top: 15px; }
+        
+        #btn-hide-ui { position: absolute; bottom: 20px; right: 20px; z-index: 20; background: #000; border: 2px solid #0f0; color: #0f0; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 0 10px #0f0; display: flex; justify-content: center; align-items: center; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">FLOOR: <span id="lbl-floor" class="highlight">1</span></div>
+    
+    <div class="analytics">
+        <div class="stat" style="color:#0ff">NE-SCORE: <span id="lbl-ne-score" class="highlight">1000.0</span></div>
+    </div>
+
+    <div class="stat" style="margin-top:15px;">SYNAPTIC TRACE:</div>
+    <div id="synapse-bar"><div id="synapse-fill"></div></div>
+    <div id="radar"></div>
+    <div class="stat">WS: <span id="ws-st" style="color:red">OFF</span></div>
+    
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span style="color:#0f0">MOVE SENSITIVITY</span><span id="lbl-skill">0.05</span></div>
+        <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
+    </div>
+
+    <!-- НОВЫЕ ПОЛЗУНКИ ДЛЯ ВЫСТАВКИ -->
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span style="color:#0ff">HOLO THRESHOLD</span><span id="lbl-holo-thr">0.15</span></div>
+        <input type="range" id="holo-thr-slider" min="0.0" max="0.5" step="0.01" value="0.15">
+    </div>
+    
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span style="color:#0ff">HOLO GAIN</span><span id="lbl-holo-gain">30</span></div>
+        <input type="range" id="holo-gain-slider" min="1" max="100" step="1" value="30">
+    </div>
+
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span style="color:#f0f">DASH SENSITIVITY</span><span id="lbl-dash-thr">0.60</span></div>
+        <input type="range" id="dash-thr-slider" min="0.1" max="1.0" step="0.01" value="0.60">
+    </div>
+    <!-- ========================== -->
+
+    <div class="slider-box">
+        <div class="stat" style="font-size: 10px;"><span style="color:#0f0">CAMERA ZOOM</span><span id="lbl-zoom">80</span></div>
+        <input type="range" id="zoom-slider" min="20" max="150" step="1" value="80">
+    </div>
+    
+    <button id="btn-invert" class="btn">USB CABLE: TOP</button>
+    <button id="vr-toggle" class="btn">ENTER VR MODE</button>
+</div>
+
+<div id="btn-hide-ui">👁️</div>
+
+<div id="overlay">
+    <h1 style="color:#0ff; text-shadow: 0 0 20px #0ff;">NEURO REACTOR v9.0</h1>
+    <p style="color:#888; max-width: 450px; font-size: 14px; margin-bottom: 20px;">
+        Exhibition Edition.<br>
+        Movement: 18-36Hz ciPLV.<br>
+        Intent Action (DASH): Theta-Gamma ciPLV peaks.
+    </p>
+    <button id="btn-start" class="btn" style="width:auto; padding:15px 30px; font-size: 20px;">CONNECT BLE</button>
+    <button id="btn-skip" class="btn" style="width:auto; border-color:#555; color:#aaa; font-size:14px; padding:10px 20px; box-shadow:none;">TEST WITHOUT BLE</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+let wakeLock = null;
+async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {} }
+document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock(); });
+
+const RADIUS = 10, CH_COUNT = 8, BUF_SIZE = 256;
+const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
+const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+// === THETA-GAMMA INTENT MULTIPLEXER ===
+const THETA_BIN = 6;  
+const GAMMA_BIN = 80; 
+const NUM_PAIRS = 28;
+const NUM_SLOTS = 7;  
+const WM_DECAY = 0.96; 
+const REF_CH = 0;     
+
+const PAIRS = [];
+const PAIR_MIDS =[]; 
+
+for (let i = 0; i < 8; i++) {
+    for (let j = i + 1; j < 8; j++) {
+        PAIRS.push([i, j]);
+        let mx = (ELECTRODES[i].x + ELECTRODES[j].x) / 2;
+        let my = (ELECTRODES[i].y + ELECTRODES[j].y) / 2;
+        PAIR_MIDS.push({x: mx, y: my});
+    }
+}
+
+const slot_re = Array.from({length: NUM_PAIRS}, () => new Float32Array(NUM_SLOTS));
+const slot_im = Array.from({length: NUM_PAIRS}, () => new Float32Array(NUM_SLOTS));
+const slot_ciplv = Array.from({length: NUM_PAIRS}, () => new Float32Array(NUM_SLOTS));
+
+let dashCooldown = 0; // Для кулдауна рывка
+// ======================================
+
+let eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+const reArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+const imArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+const centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+let electrodePressure = new Float32Array(8);
+
+// ПЕРЕМЕННЫЕ ПОЛЗУНКОВ
+let isConnected = false, skillLevel = 0.05, zoomLevel = 80, synapticPersistence = 0;
+let holoThr = 0.15, holoGain = 30.0, dashThr = 0.60;
+
+let lastTargetX = 0, lastTargetY = 0;
+let ctrl = { moveX: 0, moveY: 0, torque: 0 };
+let player = { x: 1.5, y: 1.5, angle: 0 };
+let maze, reactor;
+let isVR = false; 
+let invertDevice = false;
+let uiVisible = true;
+let effortDist = 0;
+let scoresHistory =[];
+
+let ws = new WebSocket("ws://localhost:8765");
+ws.onopen = () => document.getElementById('ws-st').innerText = "ONLINE";
+
+// БИНДИНГИ ПОЛЗУНКОВ
+document.getElementById('skill-slider').oninput = (e) => { skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3); };
+document.getElementById('zoom-slider').oninput = (e) => { zoomLevel = parseInt(e.target.value); document.getElementById('lbl-zoom').innerText = zoomLevel; };
+document.getElementById('holo-thr-slider').oninput = (e) => { holoThr = parseFloat(e.target.value); document.getElementById('lbl-holo-thr').innerText = holoThr.toFixed(2); };
+document.getElementById('holo-gain-slider').oninput = (e) => { holoGain = parseFloat(e.target.value); document.getElementById('lbl-holo-gain').innerText = holoGain.toFixed(1); };
+document.getElementById('dash-thr-slider').oninput = (e) => { dashThr = parseFloat(e.target.value); document.getElementById('lbl-dash-thr').innerText = dashThr.toFixed(2); };
+
+document.getElementById('btn-hide-ui').onclick = () => {
+    uiVisible = !uiVisible;
+    document.getElementById('ui').classList.toggle('hidden', !uiVisible);
+    document.getElementById('btn-hide-ui').style.opacity = uiVisible ? '1' : '0.5';
+};
+
+function drawRadar() {
+    const radar = document.getElementById('radar');
+    radar.innerHTML = '<div id="pointer"></div>';
+    const mult = invertDevice ? -1 : 1;
+    ELECTRODES.forEach(e => {
+        let dot = document.createElement('div'); dot.className = 'node-dot';
+        dot.style.left = (50 + e.x * 4 * mult) + '%'; dot.style.top = (50 + e.y * 4 * mult) + '%';
+        radar.appendChild(dot);
+    });
+}
+drawRadar(); 
+
+document.getElementById('btn-invert').onclick = () => {
+    invertDevice = !invertDevice;
+    const btn = document.getElementById('btn-invert');
+    btn.innerText = invertDevice ? "USB CABLE: BOTTOM" : "USB CABLE: TOP";
+    btn.style.borderColor = invertDevice ? "#ff0" : "#0f0";
+    btn.style.color = invertDevice ? "#ff0" : "#0f0";
+    btn.style.boxShadow = invertDevice ? "0 0 10px #ff0" : "0 0 10px #0f0";
+    drawRadar();
+};
+
+function fft(re, im) { 
+    const n = re.length;
+    for (let i = 0, j = 0; i < n; i++) {
+        if (j > i) [re[i], re[j]] =[re[j], re[i]], [im[i], im[j]] =[im[j], im[i]];
+        let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
+    }
+    for (let s = 2; s <= n; s <<= 1) {
+        let m = s >> 1, t = -2 * Math.PI / s, wr = Math.cos(t), wi = Math.sin(t);
+        for (let i = 0; i < n; i += s) {
+            let ar = 1, ai = 0;
+            for (let j = 0; j < m; j++) {
+                let u = i + j, v = u + m;
+                let tr = ar * re[v] - ai * im[v], ti = ar * im[v] + ai * re[v];
+                re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti;[ar, ai] =[ar * wr - ai * wi, ar * wi + ai * wr];
+            }
+        }
+    }
+}
+
+function applyNotchFilters(re, im) {
+    for(let k of[51, 102]) { for(let i=-1; i<=1; i++) { if(re[k+i]!==undefined) re[k+i]=im[k+i]=0; } }
+}
+
+function get_ciPLV(idxA, idxB) {
+    let sum_re = 0, sum_im = 0;
+    for (let k = 18; k <= 36; k++) {
+        let mA = Math.sqrt(reArr[idxA][k]**2 + imArr[idxA][k]**2) || 1e-6;
+        let mB = Math.sqrt(reArr[idxB][k]**2 + imArr[idxB][k]**2) || 1e-6;
+        let uAr = reArr[idxA][k]/mA, uAi = imArr[idxA][k]/mA, uBr = reArr[idxB][k]/mB, uBi = -imArr[idxB][k]/mB;
+        sum_re += (uAr*uBr - uAi*uBi); sum_im += (uAr*uBi + uAi*uBr);
+    }
+    let mRe = sum_re/19, mIm = sum_im/19, denom = Math.sqrt(Math.max(0, 1.0 - mRe*mRe));
+    return denom < 0.001 ? 0 : mIm / denom;
+}
+
+class NeuroReactor { 
+    constructor() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain(); this.masterGain.connect(this.ctx.destination);
+        this.voices = ELECTRODES.map((pos, i) => {
+            let osc = this.ctx.createOscillator(); let gain = this.ctx.createGain(); let pan = this.ctx.createStereoPanner();
+            osc.type = 'triangle'; osc.frequency.value = 40 + i * 10;
+            gain.gain.value = 0; pan.pan.value = pos.x / RADIUS;
+            osc.connect(gain).connect(pan).connect(this.masterGain);
+            osc.start(); return { osc, gain, baseFreq: 40 + i * 10 };
+        });
+    }
+    update(vx, vy, tq, stability) {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const t = this.ctx.currentTime;
+        this.voices.forEach((v, i) => {
+            let targetGain = (electrodePressure[i] / 15) * (0.2 + stability * 0.8);
+            v.gain.gain.setTargetAtTime(targetGain * 0.3, t, 0.1);
+            v.osc.frequency.setTargetAtTime(v.baseFreq + (vx + vy) * 10 + tq * 15, t, 0.1);
+        });
+    }
+}
+
+class Maze {
+    constructor(dim) {
+        this.dim = dim;
+        this.optimalDist = 0;
+        let attempts = 0, isValid = false, bestExit = null, bestGrid = null;
+
+        while(!isValid && attempts < 200) {
+            attempts++;
+            this.grid = Array.from({length: dim}, () => Array(dim).fill(1));
+            this.gen(1, 1);
+            
+            let exitParams = this.findHardestExit();
+            if (!bestExit || (exitParams.d + exitParams.turns > bestExit.d + bestExit.turns)) {
+                bestExit = exitParams;
+                bestGrid = this.grid.map(row =>[...row]);
+            }
+            if (exitParams.d >= 20 && exitParams.turns >= 5) { isValid = true; }
+        }
+        
+        this.grid = bestGrid;
+        this.grid[bestExit.y][bestExit.x] = 2; 
+        this.optimalDist = bestExit.d;
+    }
+    
+    gen(x, y) {
+        this.grid[y][x] = 0;
+        [[0,1],[0,-1],[1,0],[-1,0]].sort(()=>Math.random()-0.5).forEach(([dx, dy]) => {
+            let nx=x+dx*2, ny=y+dy*2;
+            if(nx>0 && nx<this.dim-1 && ny>0 && ny<this.dim-1 && this.grid[ny][nx]===1) {
+                this.grid[y+dy][x+dx] = 0; this.gen(nx, ny);
+            }
+        });
+    }
+
+    findHardestExit() {
+        let q =[{x:1, y:1, d:0, dx:0, dy:0, turns:0}];
+        let visited = Array.from({length: this.dim}, () => Array(this.dim).fill(false));
+        visited[1][1] = true;
+        let best = {x:1, y:1, d:0, turns:0}, maxScore = 0;
+
+        while(q.length > 0) {
+            let curr = q.shift();
+            let score = curr.d + curr.turns * 3; 
+            if (score > maxScore && (curr.x !== 1 || curr.y !== 1)) {
+                maxScore = score; best = curr;
+            }
+
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy]) => {
+                let nx = curr.x + dx, ny = curr.y + dy;
+                if (nx > 0 && nx < this.dim-1 && ny > 0 && ny < this.dim-1) {
+                    if (!visited[ny][nx] && this.grid[ny][nx] === 0) {
+                        visited[ny][nx] = true;
+                        let isTurn = (curr.dx !== 0 || curr.dy !== 0) && (curr.dx !== dx || curr.dy !== dy);
+                        q.push({x:nx, y:ny, d:curr.d + 1, dx:dx, dy:dy, turns: curr.turns + (isTurn ? 1 : 0)});
+                    }
+                }
+            });
+        }
+        return best;
+    }
+}
+
+let lastEegProcess = 0;
+let target_vx = 0, target_vy = 0, target_tq = 0;
+
+function gameLoop(time) {
+    if(!isConnected) return;
+    if (time - lastEegProcess > 33) {
+        lastEegProcess = time;
+        for(let t=0; t<BUF_SIZE; t++) {
+            let avg = 0; for(let c=0; c<8; c++) avg += eegBuffer[c][t]; avg *= 0.125;
+            for(let c=0; c<8; c++) centered[c][t] = eegBuffer[c][t] - avg;
+        }
+        for(let c=0; c<8; c++) {
+            for(let t=0; t<BUF_SIZE; t++) { reArr[c][t] = centered[c][t]; imArr[c][t] = 0; }
+            fft(reArr[c], imArr[c]); applyNotchFilters(reArr[c], imArr[c]);
+        }
+        
+        // 1. АВТОПИЛОТ ДВИЖЕНИЯ
+        target_vx = 0; target_vy = 0; target_tq = 0; electrodePressure.fill(0);
+        for(let i=0; i<8; i++) {
+            for(let j=i+1; j<8; j++) {
+                let val = get_ciPLV(i, j);
+                let dx = ELECTRODES[j].x - ELECTRODES[i].x, dy = ELECTRODES[j].y - ELECTRODES[i].y;
+                target_vx += val * dx; target_vy += val * dy;
+                target_tq += (val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx)) / (RADIUS * 10);
+                electrodePressure[i] += Math.abs(val); electrodePressure[j] += Math.abs(val);
+            }
+        }
+        
+        let mag = Math.sqrt(target_vx**2 + target_vy**2), dot = target_vx * lastTargetX + target_vy * lastTargetY;
+        let cosTheta = dot / (mag * Math.sqrt(lastTargetX**2 + lastTargetY**2) + 1e-6);
+        if (mag > 0.05 && cosTheta > 0.8) synapticPersistence = Math.min(1, synapticPersistence + 0.05);
+        else synapticPersistence *= 0.95;
+        lastTargetX = target_vx; lastTargetY = target_vy;
+        if(reactor) reactor.update(target_vx, target_vy, target_tq, synapticPersistence);
+
+        // 2. ИЗВЛЕЧЕНИЕ НАМЕРЕНИЙ (THETA-GAMMA)
+        let global_theta_phase = Math.atan2(imArr[REF_CH][THETA_BIN], reArr[REF_CH][THETA_BIN]);
+        let normalized_phase = (global_theta_phase + Math.PI) / (2 * Math.PI);
+        let current_slot = Math.floor(normalized_phase * NUM_SLOTS);
+        if (current_slot >= NUM_SLOTS) current_slot = NUM_SLOTS - 1;
+
+        let max_intent = 0; // Ищем самый сильный пик для механики Рывка
+
+        for (let p = 0; p < NUM_PAIRS; p++) {
+            let chA = PAIRS[p][0];
+            let chB = PAIRS[p][1];
+
+            let gA = Math.atan2(imArr[chA][GAMMA_BIN], reArr[chA][GAMMA_BIN]);
+            let gB = Math.atan2(imArr[chB][GAMMA_BIN], reArr[chB][GAMMA_BIN]);
+            let dGamma = gA - gB; 
+
+            for (let s = 0; s < NUM_SLOTS; s++) {
+                if (s === current_slot) {
+                    slot_re[p][s] = slot_re[p][s] * WM_DECAY + Math.cos(dGamma) * (1 - WM_DECAY);
+                    slot_im[p][s] = slot_im[p][s] * WM_DECAY + Math.sin(dGamma) * (1 - WM_DECAY);
+                } else {
+                    slot_re[p][s] *= WM_DECAY;
+                    slot_im[p][s] *= WM_DECAY;
+                }
+
+                let mRe = slot_re[p][s];
+                let mIm = slot_im[p][s];
+                let denom = Math.sqrt(Math.max(0, 1.0 - mRe * mRe));
+                let val = denom < 0.001 ? 0 : Math.abs(mIm / denom);
+                
+                slot_ciplv[p][s] = val;
+
+                if (val > max_intent) max_intent = val;
+            }
+        }
+
+        // 3. МЕХАНИКА ИГРЫ: РЫВОК (DASH)
+        if (max_intent > dashThr && dashCooldown <= 0) {
+            dashCooldown = 60; // Перезарядка ~2 секунды
+        }
+    }
+
+    let out_vx = invertDevice ? -target_vx : target_vx;
+    let out_vy = invertDevice ? -target_vy : target_vy;
+
+    let smooth = 0.98 - (skillLevel * 0.1), gain = skillLevel * 1.5;
+    
+    // БУСТ АКТИВИРУЕТСЯ ЕСЛИ СРАБОТАЛ РЫВОК
+    let activeBoost = (1.0 + synapticPersistence * 4.0);
+    if (dashCooldown > 45) { // Первые 15 кадров после активации - мощный рывок
+        activeBoost *= 5.0;  // 5-кратное ускорение
+    }
+    if (dashCooldown > 0) dashCooldown--;
+
+    ctrl.moveX = ctrl.moveX * smooth + out_vx * gain * (1 - smooth);
+    ctrl.moveY = ctrl.moveY * smooth + out_vy * gain * (1 - smooth);
+    ctrl.torque = ctrl.torque * smooth + target_tq * gain * 0.5 * (1 - smooth);
+
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ mx: (ctrl.moveX * activeBoost) / 10.0, my: (-ctrl.moveY * activeBoost) / 10.0, tq: (ctrl.torque * activeBoost) / 10.0 }));
+    }
+
+    player.angle += ctrl.torque * activeBoost * 0.5;
+    
+    let forwardSpeed = -ctrl.moveY * activeBoost * 0.2;
+    let strafeSpeed = ctrl.moveX * activeBoost * 0.2;
+    
+    let rawDx = Math.sin(player.angle) * forwardSpeed + Math.cos(player.angle) * strafeSpeed;
+    let rawDy = -Math.cos(player.angle) * forwardSpeed + Math.sin(player.angle) * strafeSpeed;
+    
+    effortDist += Math.sqrt(rawDx*rawDx + rawDy*rawDy);
+    
+    const MAX_SPEED = 0.15 * (dashCooldown > 45 ? 5.0 : 1.0); // Увеличиваем лимит скорости при рывке
+    let intendedMove = Math.sqrt(rawDx*rawDx + rawDy*rawDy);
+    let targetDx = rawDx, targetDy = rawDy;
+    if (intendedMove > MAX_SPEED) {
+        targetDx = (rawDx / intendedMove) * MAX_SPEED;
+        targetDy = (rawDy / intendedMove) * MAX_SPEED;
+    }
+
+    const hit = (tx, ty) => {
+        let gx = Math.floor(tx), gy = Math.floor(ty);
+        if(gy<0||gy>=maze.dim||gx<0||gx>=maze.dim) return true;
+        return maze.grid[gy][gx] === 1;
+    };
+    
+    let steps = Math.ceil(Math.max(Math.abs(targetDx), Math.abs(targetDy)) / 0.05);
+    if (steps < 1) steps = 1;
+    
+    let sdx = targetDx / steps;
+    let sdy = targetDy / steps;
+
+    for(let i=0; i<steps; i++) {
+        if(!hit(player.x + sdx + Math.sign(sdx)*0.2, player.y)) player.x += sdx; 
+        if(!hit(player.x, player.y + sdy + Math.sign(sdy)*0.2)) player.y += sdy; 
+    }
+
+    let wastedRatio = Math.max(1, effortDist / maze.optimalDist);
+    let neScore = 1000 - 144.27 * Math.log(wastedRatio);
+    if (neScore < 0) neScore = 0;
+    
+    let scoreColor = neScore > 900 ? '#0f0' : (neScore > 700 ? '#ff0' : '#f00');
+    document.getElementById('lbl-ne-score').innerText = neScore.toFixed(1);
+    document.getElementById('lbl-ne-score').style.color = scoreColor;
+
+    if(maze.grid[Math.floor(player.y)][Math.floor(player.x)] === 2) {
+        scoresHistory.push(neScore);
+        document.getElementById('lbl-floor').innerText = parseInt(document.getElementById('lbl-floor').innerText) + 1;
+        maze = new Maze(11); 
+        player.x = player.y = 1.5;
+        effortDist = 0; 
+    }
+
+    if (uiVisible) {
+        document.getElementById('synapse-fill').style.width = (synapticPersistence * 100) + '%';
+        document.getElementById('pointer').style.left = (50 + ctrl.moveX * 5) + '%';
+        document.getElementById('pointer').style.top = (50 + ctrl.moveY * 5) + '%';
+    }
+    
+    render(); requestAnimationFrame(gameLoop);
+}
+
+function drawScene(ctx, width, height, playerDisparity) {
+    const cellSize = zoomLevel; 
+    
+    ctx.save(); 
+    ctx.translate(width/2, height/2); 
+    ctx.rotate(-player.angle); 
+    ctx.translate(-player.x*cellSize, -player.y*cellSize);
+    
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(-cellSize, -cellSize, (maze.dim+2)*cellSize, (maze.dim+2)*cellSize);
+    
+    for(let r=0; r<maze.dim; r++){ 
+        for(let c=0; c<maze.dim; c++){
+            if(maze.grid[r][c] === 1) { 
+                ctx.fillStyle = `rgb(10, ${20 + synapticPersistence*80}, 30)`;
+                ctx.fillRect(c*cellSize, r*cellSize, cellSize+1, cellSize+1); 
+                ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.strokeRect(c*cellSize, r*cellSize, cellSize, cellSize);
+            }
+            else if(maze.grid[r][c] === 2) { 
+                ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(c*cellSize+cellSize/2, r*cellSize+cellSize/2, cellSize/3, 0, Math.PI*2); ctx.fill(); 
+            }
+        }
+    }
+    ctx.restore();
+
+    ctx.save(); 
+    ctx.translate(width/2 + playerDisparity, height/2); 
+    
+    // --- ГОЛОГРАММА НАМЕРЕНИЙ (СЕНСИТИВНОСТЬ ИЗ ПОЛЗУНКОВ) ---
+    const MANDALA_SCALE = (cellSize * 2.2) / RADIUS; 
+
+    for (let p = 0; p < NUM_PAIRS; p++) {
+        let px = PAIR_MIDS[p].x * MANDALA_SCALE;
+        let py = PAIR_MIDS[p].y * MANDALA_SCALE;
+
+        for (let s = 0; s < NUM_SLOTS; s++) {
+            let val = slot_ciplv[p][s];
+            
+            // Используем настраиваемый ползунок отсечки (Holo Threshold)
+            if (val > holoThr) { 
+                let startAngle = (s / NUM_SLOTS) * Math.PI * 2;
+                let endAngle = ((s + 1) / NUM_SLOTS) * Math.PI * 2;
+                
+                let hue = Math.floor((s * 360) / NUM_SLOTS);
+                let alpha = Math.min(1.0, (val - holoThr) / (1.0 - holoThr)); 
+                
+                ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+                
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                // Используем настраиваемый множитель (Holo Gain)
+                let current_radius = 2 + (val * holoGain); 
+                ctx.arc(px, py, current_radius, startAngle, endAngle);
+                ctx.lineTo(px, py);
+                ctx.fill();
+            }
+        }
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5, 0, Math.PI*2);
+        ctx.fill();
+    }
+    
+    // Эффект Рывка (Аватар светится маджентой во время кулдауна-рывка)
+    if (dashCooldown > 45) {
+        ctx.shadowColor = '#f0f';
+        ctx.shadowBlur = 20;
+    }
+
+    let pSize = cellSize * 0.25; 
+    ctx.fillStyle = (dashCooldown > 45) ? '#f0f' : '#0ff'; 
+    ctx.beginPath(); ctx.arc(0, 0, pSize, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -pSize*1.5); ctx.lineTo(-pSize*0.7, pSize*0.5); ctx.lineTo(pSize*0.7, pSize*0.5); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    if (isVR) {
+        ctx.save();
+        ctx.translate(width / 2 - 75, height - 80);
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, 150, 60);
+        
+        ctx.fillStyle = '#0f0'; ctx.font = '12px monospace'; ctx.fillText('SYNAPTIC STABILITY', 10, 15);
+        ctx.fillStyle = '#111'; ctx.fillRect(10, 22, 130, 6);
+        ctx.fillStyle = '#0ff'; ctx.fillRect(10, 22, 130 * synapticPersistence, 6);
+        
+        let liveScore = document.getElementById('lbl-ne-score').innerText;
+        ctx.fillStyle = document.getElementById('lbl-ne-score').style.color; 
+        ctx.font = '14px monospace'; ctx.fillText('NE-SCORE: ' + liveScore, 10, 45);
+        ctx.restore();
+    }
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas'), ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+    if (isVR) {
+        const halfW = cvs.width / 2;
+        const playerDisparity = 3; 
+
+        ctx.save();
+        ctx.beginPath(); ctx.rect(0, 0, halfW, cvs.height); ctx.clip();
+        drawScene(ctx, halfW, cvs.height, playerDisparity);
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath(); ctx.rect(halfW, 0, halfW, cvs.height); ctx.clip();
+        ctx.translate(halfW, 0);
+        drawScene(ctx, halfW, cvs.height, -playerDisparity);
+        ctx.restore();
+
+        ctx.fillStyle = '#020202';
+        ctx.fillRect(halfW - 2, 0, 4, cvs.height);
+    } else {
+        drawScene(ctx, cvs.width, cvs.height, 0);
+    }
+}
+
+function toggleVR() {
+    isVR = !isVR;
+    const ui = document.getElementById('ui');
+    const btnHide = document.getElementById('btn-hide-ui');
+    const docEl = document.documentElement;
+
+    if (isVR) {
+        ui.style.display = 'none'; 
+        btnHide.style.display = 'none';
+        document.body.style.cursor = 'none'; 
+        if (docEl.requestFullscreen) docEl.requestFullscreen();
+        else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+        try { screen.orientation.lock("landscape").catch(()=>{}); } catch(e){}
+    } else {
+        ui.style.display = 'block'; 
+        btnHide.style.display = 'flex';
+        document.body.style.cursor = 'default';
+        if (document.fullscreenElement) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+    }
+}
+
+document.getElementById('vr-toggle').onclick = toggleVR;
+document.getElementById('gameCanvas').addEventListener('click', () => { if (isVR) toggleVR(); });
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && isVR) {
+        isVR = false;
+        document.getElementById('ui').style.display = 'block';
+        document.getElementById('btn-hide-ui').style.display = 'flex';
+        document.body.style.cursor = 'default';
+    }
+});
+
+function startGame() {
+    requestWakeLock(); 
+    maze = new Maze(11); 
+    effortDist = 0;
+    scoresHistory =[];
+    document.getElementById('overlay').style.display = 'none'; 
+    isConnected = true; 
+    gameLoop();
+}
+
+document.getElementById('btn-skip').onclick = () => { startGame(); };
+
+document.getElementById('btn-start').onclick = async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+        const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
+        await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, 0x22, 0x22]));
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            let b = new Uint8Array(e.target.value.buffer);
+            if(b[0] === 0xA0) {
+                for(let i=0; i<8; i++) {
+                    let v = (b[2+i*3]<<16) | (b[3+i*3]<<8) | b[4+i*3];
+                    if(v & 0x800000) v -= 0x1000000;
+                    eegBuffer[i].set(eegBuffer[i].subarray(1)); eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
+                }
+            }
+        });
+        reactor = new NeuroReactor(); 
+        startGame();
+    } catch(e) { alert(e); }
+};
+</script>
+</body>
+</html>
