@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuro-Arena: Anonymous Nodes</title>
+    <style>
+        body { margin: 0; background: #050505; color: #0f0; font-family: monospace; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; z-index: 1; }
+        
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border: 2px solid #0f0; border-radius: 8px; width: 260px; max-height: 90vh; overflow-y: auto; }
+        
+        .stat { font-size: 12px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+        .slider-box { margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
+        input[type=range] { width: 100%; accent-color: #0f0; cursor: pointer; }
+
+        .btn { background: #000; color: #0f0; border: 2px solid #0f0; padding: 10px; font-size: 12px; cursor: pointer; width: 100%; margin-bottom: 10px; font-family: monospace; transition: 0.2s; font-weight: bold;}
+        .btn:active { background: #0f0; color: #000; }
+        
+        .node-ui { margin-top: 15px; padding: 10px; border: 1px dashed #555; border-radius: 5px; }
+        .bar-bg { width: 100%; height: 6px; background: #111; margin-top: 5px; border: 1px solid #333; }
+        .bar-fg { height: 100%; transition: width 0.1s linear; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h3 style="margin-top:0; color:#0ff;">NEURO-ARENA</h3>
+    
+    <button id="btn-ble" class="btn">+ ПОДКЛЮЧИТЬ УЗЕЛ</button>
+    <button id="btn-sim" class="btn" style="border-color:#555; color:#aaa;">+ ТЕСТ (Без BLE)</button>
+
+    <div class="slider-box">
+        <div class="stat"><span style="color:#0f0">MOVE SENSITIVITY</span><span id="lbl-skill">0.05</span></div>
+        <input type="range" id="skill-slider" min="0.001" max="1.0" step="0.001" value="0.05">
+    </div>
+    <div class="slider-box">
+        <div class="stat"><span style="color:#f0f">TK THRESHOLD</span><span id="lbl-holo">0.20</span></div>
+        <input type="range" id="holo-slider" min="0.0" max="0.5" step="0.01" value="0.20">
+    </div>
+
+    <div id="nodes-container"></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const RADIUS = 10, CH_COUNT = 8, BUF_SIZE = 256;
+const ANGLES =[-72, -36, 36, 72, 108, 144, -144, -108].map(d => d * Math.PI / 180);
+const ELECTRODES = ANGLES.map(a => ({ x: Math.cos(a) * RADIUS, y: Math.sin(a) * RADIUS }));
+const UV_SCALE = (1.2 / 4.0 / 8388607.0) * 1e6;
+
+const THETA_BIN = 6, GAMMA_BIN = 80, NUM_SLOTS = 7, WM_DECAY = 0.96, REF_CH = 0;     
+const ARENA_SIZE = 5; 
+
+const PAIRS =[];
+const PAIR_MIDS =[]; 
+for (let i = 0; i < 8; i++) {
+    for (let j = i + 1; j < 8; j++) {
+        PAIRS.push([i, j]);
+        PAIR_MIDS.push({ x: (ELECTRODES[i].x + ELECTRODES[j].x) / 2, y: (ELECTRODES[i].y + ELECTRODES[j].y) / 2 });
+    }
+}
+
+let skillLevel = 0.05;
+let holoThr = 0.20;
+document.getElementById('skill-slider').oninput = (e) => { skillLevel = parseFloat(e.target.value); document.getElementById('lbl-skill').innerText = skillLevel.toFixed(3); };
+document.getElementById('holo-slider').oninput = (e) => { holoThr = parseFloat(e.target.value); document.getElementById('lbl-holo').innerText = holoThr.toFixed(2); };
+
+function fft(re, im) { 
+    const n = re.length;
+    for (let i = 0, j = 0; i < n; i++) {
+        if (j > i) [re[i], re[j]] = [re[j], re[i]],[im[i], im[j]] = [im[j], im[i]];
+        let m = n >> 1; while (m >= 1 && j >= m) j -= m, m >>= 1; j += m;
+    }
+    for (let s = 2; s <= n; s <<= 1) {
+        let m = s >> 1, t = -2 * Math.PI / s, wr = Math.cos(t), wi = Math.sin(t);
+        for (let i = 0; i < n; i += s) {
+            let ar = 1, ai = 0;
+            for (let j = 0; j < m; j++) {
+                let u = i + j, v = u + m;
+                let tr = ar * re[v] - ai * im[v], ti = ar * im[v] + ai * re[v];
+                re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti;
+                [ar, ai] =[ar * wr - ai * wi, ar * wi + ai * wr];
+            }
+        }
+    }
+}
+
+function applyNotchFilters(re, im) {
+    for(let k of[51, 102]) { for(let i=-1; i<=1; i++) { if(re[k+i]!==undefined) re[k+i]=im[k+i]=0; } }
+}
+
+class BrainNode {
+    constructor(id, color, isSim = false) {
+        this.id = id;
+        this.color = color;
+        this.isSim = isSim;
+        
+        this.numPairs = PAIRS.length;
+
+        this.eegBuffer = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+        this.reArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+        this.imArr = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+        this.centered = Array.from({length: 8}, () => new Float32Array(BUF_SIZE));
+        
+        this.slot_re = Array.from({length: this.numPairs}, () => new Float32Array(NUM_SLOTS));
+        this.slot_im = Array.from({length: this.numPairs}, () => new Float32Array(NUM_SLOTS));
+        this.slot_ciplv = Array.from({length: this.numPairs}, () => new Float32Array(NUM_SLOTS));
+
+        this.lastTargetX = 0; this.lastTargetY = 0;
+        this.synapticPersistence = 0;
+        this.ctrl = { moveX: 0, moveY: 0, torque: 0 };
+        
+        this.x = (Math.random() - 0.5) * (ARENA_SIZE); 
+        this.y = (Math.random() - 0.5) * (ARENA_SIZE);
+        this.angle = 0;
+        
+        this.lastEegProcess = 0;
+        this.score = 0;
+
+        this.createUI();
+    }
+
+    parseBLE(data) {
+        if(data[0] === 0xA0) {
+            for(let i=0; i<8; i++) {
+                let v = (data[2+i*3]<<16) | (data[3+i*3]<<8) | data[4+i*3];
+                if(v & 0x800000) v -= 0x1000000;
+                this.eegBuffer[i].set(this.eegBuffer[i].subarray(1)); 
+                this.eegBuffer[i][BUF_SIZE-1] = v * UV_SCALE;
+            }
+        }
+    }
+
+    processMath(time) {
+        if (this.isSim) this.simulateData();
+
+        if (time - this.lastEegProcess > 33) {
+            this.lastEegProcess = time;
+            
+            for(let t=0; t<BUF_SIZE; t++) {
+                let avg = 0; for(let c=0; c<8; c++) avg += this.eegBuffer[c][t]; avg *= 0.125;
+                for(let c=0; c<8; c++) this.centered[c][t] = this.eegBuffer[c][t] - avg;
+            }
+
+            for(let c = 0; c < 8; c++) {
+                for(let t=0; t<BUF_SIZE; t++) { this.reArr[c][t] = this.centered[c][t]; this.imArr[c][t] = 0; }
+                fft(this.reArr[c], this.imArr[c]); applyNotchFilters(this.reArr[c], this.imArr[c]);
+            }
+
+            let target_vx = 0, target_vy = 0, target_tq = 0;
+            for (let i = 0; i < 8; i++) {
+                for(let j = i + 1; j < 8; j++) {
+                    let val = this.get_ciPLV(i, j);
+                    let dx = ELECTRODES[j].x - ELECTRODES[i].x, dy = ELECTRODES[j].y - ELECTRODES[i].y;
+                    target_vx += val * dx; target_vy += val * dy;
+                    target_tq += (val * (ELECTRODES[i].x * dy - ELECTRODES[i].y * dx)) / (RADIUS * 10);
+                }
+            }
+            
+            let mag = Math.sqrt(target_vx**2 + target_vy**2);
+            let dot = target_vx * this.lastTargetX + target_vy * this.lastTargetY;
+            let cosTheta = dot / (mag * Math.sqrt(this.lastTargetX**2 + this.lastTargetY**2) + 1e-6);
+            if (mag > 0.05 && cosTheta > 0.8) this.synapticPersistence = Math.min(1, this.synapticPersistence + 0.05);
+            else this.synapticPersistence *= 0.95;
+            this.lastTargetX = target_vx; this.lastTargetY = target_vy;
+
+            let global_theta = Math.atan2(this.imArr[REF_CH][THETA_BIN], this.reArr[REF_CH][THETA_BIN]);
+            let norm_phase = (global_theta + Math.PI) / (2 * Math.PI);
+            let current_slot = Math.floor(norm_phase * NUM_SLOTS);
+            if (current_slot >= NUM_SLOTS) current_slot = NUM_SLOTS - 1;
+
+            for (let p = 0; p < this.numPairs; p++) {
+                let chA = PAIRS[p][0], chB = PAIRS[p][1];
+                let gA = Math.atan2(this.imArr[chA][GAMMA_BIN], this.reArr[chA][GAMMA_BIN]);
+                let gB = Math.atan2(this.imArr[chB][GAMMA_BIN], this.reArr[chB][GAMMA_BIN]);
+                let dGamma = gA - gB; 
+
+                for (let s = 0; s < NUM_SLOTS; s++) {
+                    if (s === current_slot) {
+                        this.slot_re[p][s] = this.slot_re[p][s] * WM_DECAY + Math.cos(dGamma) * (1 - WM_DECAY);
+                        this.slot_im[p][s] = this.slot_im[p][s] * WM_DECAY + Math.sin(dGamma) * (1 - WM_DECAY);
+                    } else {
+                        this.slot_re[p][s] *= WM_DECAY;
+                        this.slot_im[p][s] *= WM_DECAY;
+                    }
+                    let denom = Math.sqrt(Math.max(0, 1.0 - this.slot_re[p][s]**2));
+                    this.slot_ciplv[p][s] = denom < 0.001 ? 0 : Math.abs(this.slot_im[p][s] / denom);
+                }
+            }
+
+            let smooth = 0.98 - (skillLevel * 0.1), gain = skillLevel * 1.5, boost = (1.0 + this.synapticPersistence * 4.0);
+            this.ctrl.moveX = this.ctrl.moveX * smooth + target_vx * gain * (1 - smooth);
+            this.ctrl.moveY = this.ctrl.moveY * smooth + target_vy * gain * (1 - smooth);
+            this.ctrl.torque = this.ctrl.torque * smooth + target_tq * gain * 0.5 * (1 - smooth);
+
+//            this.angle += this.ctrl.torque * boost * 0.5;
+            let forwardSpeed = -this.ctrl.moveY * boost * 0.2;
+            let strafeSpeed = this.ctrl.moveX * boost * 0.2;
+            
+            let rawDx = Math.sin(this.angle) * forwardSpeed + Math.cos(this.angle) * strafeSpeed;
+            let rawDy = -Math.cos(this.angle) * forwardSpeed + Math.sin(this.angle) * strafeSpeed;
+            
+            let speed = Math.sqrt(rawDx**2 + rawDy**2);
+            if (speed > 0.15) { rawDx = (rawDx/speed)*0.15; rawDy = (rawDy/speed)*0.15; }
+            
+            this.x += rawDx; this.y += rawDy;
+
+            if (this.x < -ARENA_SIZE) this.x = -ARENA_SIZE;
+            if (this.x > ARENA_SIZE)  this.x = ARENA_SIZE;
+            if (this.y < -ARENA_SIZE) this.y = -ARENA_SIZE;
+            if (this.y > ARENA_SIZE)  this.y = ARENA_SIZE;
+
+            this.updateUI();
+        }
+    }
+
+    get_ciPLV(idxA, idxB) {
+        let sum_re = 0, sum_im = 0;
+        for (let k = 18; k <= 36; k++) {
+            let mA = Math.sqrt(this.reArr[idxA][k]**2 + this.imArr[idxA][k]**2) || 1e-6;
+            let mB = Math.sqrt(this.reArr[idxB][k]**2 + this.imArr[idxB][k]**2) || 1e-6;
+            let uAr = this.reArr[idxA][k]/mA, uAi = this.imArr[idxA][k]/mA, uBr = this.reArr[idxB][k]/mB, uBi = -this.imArr[idxB][k]/mB;
+            sum_re += (uAr*uBr - uAi*uBi); sum_im += (uAr*uBi + uAi*uBr);
+        }
+        let mRe = sum_re/19, mIm = sum_im/19, denom = Math.sqrt(Math.max(0, 1.0 - mRe*mRe));
+        return denom < 0.001 ? 0 : mIm / denom;
+    }
+
+    simulateData() {
+        for(let i=0; i<8; i++) {
+            this.eegBuffer[i].set(this.eegBuffer[i].subarray(1));
+            this.eegBuffer[i][BUF_SIZE-1] = (Math.random()-0.5) * 50; 
+            if(Math.random() < 0.05) this.eegBuffer[i][BUF_SIZE-1] += Math.sin(Date.now()*0.02 + this.id) * 100;
+        }
+    }
+
+    createUI() {
+        const div = document.createElement('div');
+        div.className = 'node-ui';
+        div.id = 'ui-' + this.id;
+        div.innerHTML = `
+            <div style="display:flex; align-items:center;">
+                <div style="width:12px; height:12px; background:${this.color}; margin-right:8px; border-radius:50%"></div>
+                <span>Очки: <span id="sc-${this.id}">0</span></span>
+            </div>
+            <div class="stat">Стабильность</div>
+            <div class="bar-bg"><div class="bar-fg" id="bar-${this.id}" style="background:${this.color};"></div></div>
+        `;
+        document.getElementById('nodes-container').appendChild(div);
+    }
+
+    updateUI() {
+        document.getElementById(`bar-${this.id}`).style.width = (this.synapticPersistence * 100) + '%';
+        document.getElementById(`sc-${this.id}`).innerText = this.score;
+    }
+}
+
+// ==========================================
+// СРЕДА И ПОДКЛЮЧЕНИЕ
+// ==========================================
+const nodes =[];
+const crystals =[];
+for(let i=0; i<15; i++) {
+    crystals.push({ 
+        x: (Math.random()-0.5) * (ARENA_SIZE * 1.8), 
+        y: (Math.random()-0.5) * (ARENA_SIZE * 1.8), 
+        state: 'idle', targetNode: null 
+    });
+}
+
+function gameLoop(time) {
+    nodes.forEach(n => n.processMath(time));
+
+    for (let c of crystals) {
+        if (c.state === 'collected') continue;
+        let bestPull = 0; let puller = null;
+
+        for (let node of nodes) {
+            let dx = c.x - node.x, dy = c.y - node.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 0.5) {
+                c.state = 'collected';
+                node.score += 100;
+                setTimeout(() => { 
+                    c.x = (Math.random()-0.5) * (ARENA_SIZE * 1.8); 
+                    c.y = (Math.random()-0.5) * (ARENA_SIZE * 1.8); 
+                    c.state = 'idle'; 
+                }, 3000);
+                continue;
+            }
+
+            if (dist < 5.0 && c.state === 'idle') {
+                let globalAngle = Math.atan2(dy, dx);
+                let egoAngle = globalAngle - node.angle;
+                let cx = Math.cos(egoAngle), cy = Math.sin(egoAngle);
+
+                for (let p = 0; p < node.numPairs; p++) {
+                    let px = PAIR_MIDS[p].x, py = PAIR_MIDS[p].y;
+                    let len = Math.sqrt(px*px + py*py) || 1;
+                    if (cx*(px/len) + cy*(py/len) > 0.85) { 
+                        for(let s=0; s<NUM_SLOTS; s++) {
+                            if(node.slot_ciplv[p][s] > holoThr && node.slot_ciplv[p][s] > bestPull) {
+                                bestPull = node.slot_ciplv[p][s];
+                                puller = node;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (puller) { c.state = 'pulling'; c.targetNode = puller; }
+        if (c.state === 'pulling' && c.targetNode) {
+            let dx = c.x - c.targetNode.x, dy = c.y - c.targetNode.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            c.x -= (dx / dist) * 0.15; c.y -= (dy / dist) * 0.15;
+        }
+    }
+
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    const cvs = document.getElementById('gameCanvas'), ctx = cvs.getContext('2d');
+    cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+    const minScreen = Math.min(cvs.width, cvs.height);
+    const cellSize = minScreen / (ARENA_SIZE * 2.2); 
+    const offsetX = cvs.width/2 + 100, offsetY = cvs.height/2;
+
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+
+    ctx.strokeStyle = '#0f0'; ctx.lineWidth = 3;
+    ctx.strokeRect(-ARENA_SIZE * cellSize, -ARENA_SIZE * cellSize, ARENA_SIZE * 2 * cellSize, ARENA_SIZE * 2 * cellSize);
+
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+    for(let i=-ARENA_SIZE; i<=ARENA_SIZE; i++) {
+        ctx.beginPath(); ctx.moveTo(i*cellSize, -ARENA_SIZE*cellSize); ctx.lineTo(i*cellSize, ARENA_SIZE*cellSize); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-ARENA_SIZE*cellSize, i*cellSize); ctx.lineTo(ARENA_SIZE*cellSize, i*cellSize); ctx.stroke();
+    }
+
+    for(let c of crystals) {
+        if(c.state === 'collected') continue;
+        let cx = c.x * cellSize, cy = c.y * cellSize;
+        if (c.state === 'pulling' && c.targetNode) {
+            ctx.strokeStyle = c.targetNode.color; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(c.targetNode.x*cellSize, c.targetNode.y*cellSize); ctx.lineTo(cx, cy); ctx.stroke();
+        }
+        ctx.fillStyle = '#f0f'; ctx.beginPath(); ctx.arc(cx, cy, cellSize*0.2, 0, Math.PI*2); ctx.fill();
+    }
+
+    for(let node of nodes) {
+        ctx.save();
+        ctx.translate(node.x * cellSize, node.y * cellSize);
+        ctx.rotate(node.angle);
+
+        const MANDALA_SCALE = (cellSize * 2.0) / RADIUS; 
+        for (let p = 0; p < node.numPairs; p++) {
+            let px = PAIR_MIDS[p].x, py = PAIR_MIDS[p].y;
+            for (let s = 0; s < NUM_SLOTS; s++) {
+                let val = node.slot_ciplv[p][s];
+                if (val > holoThr) { 
+                    ctx.fillStyle = node.color;
+                    ctx.globalAlpha = Math.min(1.0, (val - holoThr) / (1.0 - holoThr)); 
+                    ctx.beginPath(); ctx.arc(px, py, 2 + (val * 20), (s/NUM_SLOTS)*Math.PI*2, ((s+1)/NUM_SLOTS)*Math.PI*2); ctx.lineTo(px, py); ctx.fill();
+                }
+            }
+        }
+
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = node.color; ctx.beginPath(); ctx.arc(0, 0, cellSize*0.3, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -cellSize*0.4); ctx.lineTo(-cellSize*0.2, cellSize*0.1); ctx.lineTo(cellSize*0.2, cellSize*0.1); ctx.fill();
+        ctx.restore();
+    }
+    ctx.restore();
+}
+
+const COLORS =['#0ff', '#f0f', '#ff0', '#0f0'];
+
+document.getElementById('btn-sim').onclick = () => {
+    let id = nodes.length;
+    nodes.push(new BrainNode(id, COLORS[id % COLORS.length], true));
+};
+
+async function connectBLE() {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services:["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        const dataChar = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+        const cmdChar = await service.getCharacteristic("c0de0001-36e1-4688-b7f5-ea07361b26a8");
+        
+        await cmdChar.writeValue(new Uint8Array([0x04, 0x22, 0x22]));
+        await new Promise(r => setTimeout(r, 100));
+        await cmdChar.writeValue(new Uint8Array([0x05, 0x22, 0x22]));
+        
+        let id = nodes.length;
+        let node = new BrainNode(id, COLORS[id % COLORS.length], false);
+        nodes.push(node); 
+        
+        await dataChar.startNotifications();
+        dataChar.addEventListener('characteristicvaluechanged', (e) => {
+            node.parseBLE(new Uint8Array(e.target.value.buffer));
+        });
+    } catch(e) { 
+        alert("Ошибка BLE: " + e); 
+    }
+}
+
+document.getElementById('btn-ble').onclick = () => connectBLE();
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
