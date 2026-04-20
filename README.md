@@ -30,8 +30,8 @@
 
 [Neuro_Test_Bench](https://neuroidss.github.io/FreeEEG8-alpha/Neuro_Test_Bench/Neuro_Test_Bench.html)
 
-[FreeEEG8-alpha_1_3_gerbers](https://github.com/neuroidss/FreeEEG8-alpha/releases/tag/FreeEEG8-alpha_1_3_gerbers)
-![freeeeg8-alpha1.3](https://github.com/neuroidss/FreeEEG8-alpha/blob/main/Screenshot%20from%202026-04-16%2002-36-55%20FreeEEG8-alpha_1_3.png?raw=true)
+[FreeEEG8-alpha_1_4_gerbers](https://github.com/neuroidss/FreeEEG8-alpha/releases/tag/FreeEEG8-alpha_1_4_gerbers)
+![freeeeg8-alpha1.4](https://github.com/neuroidss/FreeEEG8-alpha/blob/main/Screenshot%20from%202026-04-16%2002-36-55%20FreeEEG8-alpha_1_3.png?raw=true)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/neuroidss/FreeEEG8-alpha/blob/main/freeeeg8-alpha_create_function_chat.ipynb)
 run colab to get gerber&bom freeeeg8-alpha.kicad_pcb.zip
