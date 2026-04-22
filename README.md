@@ -1,5 +1,7 @@
 # FreeEEG8-alpha
 
+[mobile_diagnostic_stand](https://neuroidss.github.io/FreeEEG8-alpha/semantic_engine/mobile_diagnostic_stand.html)
+
 [Neuro-Arena_Anonymous_Nodes](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/Neuro-Arena_Anonymous_Nodes.html)
 
 [neuro_dungeon_gamepad_emulator_mimic](https://neuroidss.github.io/FreeEEG8-alpha/neuro_game/neuro_dungeon_gamepad_emulator_mimic.html)
