@@ -3,6 +3,7 @@ import torch, numpy as np, cv2, pygame, time, gc, math
 from PIL import Image
 from diffusers import StableDiffusionImg2ImgPipeline, LCMScheduler, AutoencoderTiny
 
+# Пытаемся импортировать реальную логику
 try:
     from bci_logic import CrystalBCI
     BCI_AVAILABLE = True
@@ -13,18 +14,12 @@ W, H = 512, 384
 UI_W = 420 
 
 class MockBCI:
-    """ Симулятор: скорость = sin(t). Математический маятник. """
+    """ Заглушка, если файл bci_logic.py вообще отсутствует """
     def __init__(self):
         self.is_connected = False
         self.persistence = 0.0
         self.ciplv_vec = np.zeros(28, dtype=np.float32)
-        self.scales = np.cos(np.arange(28) * 0.7) * 2.0
-
-    def update_sim_internal(self, current_time, duration):
-        freq = (2 * np.pi) / duration
-        velocity_wave = np.sin(current_time * freq)
-        self.ciplv_vec = velocity_wave * self.scales
-        self.persistence = abs(velocity_wave)
+    def update_sim(self): pass
 
 class StabilityLabBCI:
     def __init__(self, mode="lcm"):
@@ -36,21 +31,23 @@ class StabilityLabBCI:
         self.paused = False
         self.reset_active = False 
         
+        # Управление временем для симулятора
         self.sim_start_time = time.time()
         self.sim_duration = 10.0
+        self.sim_scales = np.cos(np.arange(28) * 0.7) * 2.0 # Направления симуляции
         
+        # Инициализируем BCI (он сам будет пытаться подключиться в фоне)
         self.bci = CrystalBCI() if BCI_AVAILABLE else MockBCI()
         
-        # --- ПАРАМЕТРЫ V38 ---
+        # --- ТВОИ РАБОЧИЕ ПАРАМЕТРЫ ---
         self.p = {
-            "unet_passes": 3,      
+            "unet_passes": 1,      
             "noise_inject": 0.97,  
             "guidance": 1.20,      
             "g_channel_nerf": 1.0, 
-            "bci_apply": 0.01,
-            # --- НОВЫЕ ПАРАМЕТРЫ ВОЗВРАТА ---
-            "elasticity": 0.0,   # Тяга к центру (0.0 - 1.0)
-            "focus_grip": 0.0    # Насколько Persistence (фокус) гасит тягу к центру
+            "bci_apply": 0.003,
+            "elasticity": 1.0,   
+            "focus_grip": 0.0    
         }
         
         self.accumulated_drift = None 
@@ -84,6 +81,10 @@ class StabilityLabBCI:
         if strength >= 0.99: return int(target_passes)
         return min(50, max(int(target_passes) + 1, math.ceil(target_passes / strength)))
 
+    def reset_logic(self):
+        self.accumulated_drift.zero_()
+        self.sim_start_time = time.time()
+
     def surgery(self, current_f32, old_f32):
         res = current_f32.copy()
         if self.p["g_channel_nerf"] > 0:
@@ -93,32 +94,35 @@ class StabilityLabBCI:
         return np.clip(res, 0, 255).astype(np.float32)
 
     def step(self):
-        if hasattr(self.bci, 'update_sim_internal'):
-            self.bci.update_sim_internal(time.time() - self.sim_start_time, self.sim_duration)
+        # --- ЛОГИКА ПОДКЛЮЧЕНИЯ ---
+        if self.bci.is_connected:
+            self.bci.update_sim() # Обновляем реальный поток (названо update_sim для совместимости)
         else:
-            self.bci.update_sim()
+            # Если не подключен — крутим нашу математическую "Волну"
+            t_sim = time.time() - self.sim_start_time
+            freq = (2 * np.pi) / self.sim_duration
+            wave = np.sin(t_sim * freq)
+            self.bci.ciplv_vec = wave * self.sim_scales
+            self.bci.persistence = abs(wave)
         
         focus = self.bci.persistence
         apply_force = focus * self.p["bci_apply"]
 
         if self.reset_active:
-            self.accumulated_drift.zero_()
-            self.sim_start_time = time.time() # Ресет фазы симуляции
+            self.reset_logic()
             effective_focus = 0.0
         else:
-            # 1. Применяем ДРЕЙФ (исследование)
-            velocities = torch.tensor(self.bci.ciplv_vec, device=self.device, dtype=self.dtype).unsqueeze(0)
-            self.accumulated_drift += torch.matmul(velocities, self.direction_basis) * apply_force * 2.0
-            
-            # 2. Применяем УПРУГОСТЬ (Homeostasis)
-            # Тяга к центру ослабевает, если FOCUS_GRIP активен и есть фокус
-            pull_back_strength = self.p["elasticity"] * (1.0 - (focus * self.p["focus_grip"]))
-            if pull_back_strength > 0:
-                # Мягко тянем тензор к нулю (0.01 - 0.1 на шаг)
-                self.accumulated_drift *= (1.0 - pull_back_strength * 0.1)
-
             effective_focus = apply_force
-        
+            velocities = torch.tensor(self.bci.ciplv_vec, device=self.device, dtype=self.dtype).unsqueeze(0)
+            # Накопление пути (Investigation)
+            self.accumulated_drift += torch.matmul(velocities, self.direction_basis) * apply_force * 5.0
+            
+            # Упругость (Homeostasis) - по умолчанию выключена (elasticity=0)
+            pull_back = self.p["elasticity"] * (1.0 - (focus * self.p["focus_grip"]))
+            if pull_back > 0:
+                self.accumulated_drift *= (1.0 - pull_back * 0.1)
+
+        # Вытеснение шума
         current_noise = self.p["noise_inject"] * (1.0 - effective_focus)
         current_noise = max(0.05, min(1.0, current_noise))
         
@@ -170,12 +174,12 @@ def main():
 
         if dragging:
             p_keys = list(lab.p.keys())
-            p_idx = (my - 125) // 35 
+            p_idx = (my - 130) // 35 
             if 0 <= p_idx < len(p_keys):
                 k = p_keys[p_idx]
                 val = np.clip((mx - 20) / 300, 0, 1)
                 if k == "unet_passes": lab.p[k] = int(val * 4) + 1 
-                elif k in ["elasticity", "focus_grip"]: lab.p[k] = val
+                elif k == "bci_apply": lab.p[k] = val * 0.1 # Лимит для точности
                 else: lab.p[k] = val
 
         lab.step()
@@ -185,27 +189,41 @@ def main():
         screen.blit(img_py, (UI_W, 0))
         pygame.draw.rect(screen, (15, 15, 18), (0, 0, UI_W, H))
         
-        pygame.draw.rect(screen, (255, 50, 50) if lab.reset_active else (100, 20, 20), btn_rect, border_radius=5)
+        # Статус BCI
+        bci_status = "BCI: CONNECTED" if lab.bci.is_connected else "BCI: SEARCHING/SIM..."
+        bci_col = (0, 255, 120) if lab.bci.is_connected else (255, 150, 0)
+        screen.blit(small_font.render(bci_status, True, bci_col), (20, 50))
+        
+        # Кнопка
+        btn_col = (255, 50, 50) if lab.reset_active else (100, 20, 20)
+        pygame.draw.rect(screen, btn_col, btn_rect, border_radius=5)
         screen.blit(font.render("HOLD RESET (R)", True, (255, 255, 255)), (btn_rect.x+12, btn_rect.y+9))
         
-        dist_col = (0, 255, 150) if lab.drift_mag < 0.1 else (0, 200, 255)
+        dist_col = (0, 255, 150) if lab.drift_mag < 0.05 else (0, 200, 255)
         screen.blit(small_font.render(f"DRIFT: {lab.drift_mag:.5f}", True, dist_col), (190, 22))
 
-        # Визуализация замещения
+        # Визуализация фазы (для симулятора)
+        if not lab.bci.is_connected:
+            t_sim = time.time() - lab.sim_start_time
+            wave = np.sin(t_sim * (2 * np.pi / lab.sim_duration))
+            pygame.draw.rect(screen, (30, 30, 40), (20, 70, UI_W-40, 8))
+            pygame.draw.rect(screen, (0, 150, 255), (20, 70, int((UI_W-40)*(0.5 + 0.5 * wave)), 8))
+            
+        # Замещение
         f_disp = lab.bci.persistence * lab.p["bci_apply"]
-        pygame.draw.rect(screen, (40, 40, 40), (20, 90, UI_W-40, 10))
-        pygame.draw.rect(screen, (255, 200, 0), (20, 90, int((UI_W-40)*(1-f_disp)), 10)) 
-        pygame.draw.rect(screen, (0, 180, 255), (20 + int((UI_W-40)*(1-f_disp)), 90, int((UI_W-40)*f_disp), 10))
-        screen.blit(small_font.render(f"NOISE vs BCI DYNAMICS: {f_disp*100:.1f}%", True, (200,200,200)), (20, 80))
+        pygame.draw.rect(screen, (40, 40, 40), (20, 100, UI_W-40, 12))
+        pygame.draw.rect(screen, (255, 200, 0), (20, 100, int((UI_W-40)*(1-f_disp)), 12)) 
+        pygame.draw.rect(screen, (0, 180, 255), (20 + int((UI_W-40)*(1-f_disp)), 100, int((UI_W-40)*f_disp), 12))
+        screen.blit(small_font.render(f"NOISE vs BCI DYNAMICS: {f_disp*100:.2f}%", True, (200,200,200)), (20, 88))
 
         for i, (k, v) in enumerate(lab.p.items()):
-            y_pos = 125 + i * 35
+            y_pos = 135 + i * 35
             col = (255, 100, 255) if k == "unet_passes" else (255, 200, 0) if k == "noise_inject" else (0, 200, 255)
             if k in ["elasticity", "focus_grip"]: col = (100, 255, 100)
             
             screen.blit(font.render(f"{k.upper()[:15]:15}: {v:6.4f}", True, col), (20, y_pos))
             pygame.draw.rect(screen, (40, 40, 40), (220, y_pos+6, 150, 4))
-            norm = (v-1)/4 if k=="unet_passes" else v
+            norm = (v-1)/4 if k=="unet_passes" else v/0.1 if k=="bci_apply" else v
             pygame.draw.rect(screen, col, (220, y_pos+6, int(150 * np.clip(norm, 0, 1)), 4))
 
         pygame.display.flip()
